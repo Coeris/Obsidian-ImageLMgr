@@ -1,0 +1,29 @@
+# 依赖
+node_modules/
+
+# 构建产物
+main.js
+*.js.map
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 系统
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Obsidian 插件数据（用户个人配置，不应提交）
+data.json
+_hashcache.json
+_webdavmeta.json
+
+# 开发
+.dev-reload
+
+# 日志
+*.log
+npm-debug.log*

@@ -1,0 +1,529 @@
+/* ImageLMgr - 图床管理助手 */
+
+.imagelmgr-container {
+	padding: 12px;
+	font-size: 13px;
+	color: var(--text-normal);
+}
+
+.imagelmgr-header {
+	font-size: 16px;
+	font-weight: 700;
+	padding-bottom: 10px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	margin-bottom: 10px;
+}
+
+/* 工具栏 */
+.imagelmgr-toolbar {
+	display: flex;
+	gap: 6px;
+	margin-bottom: 8px;
+}
+
+.imagelmgr-toolbar button {
+	padding: 4px 12px;
+	border-radius: 4px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	color: var(--text-normal);
+	cursor: pointer;
+	font-size: 12px;
+}
+
+.imagelmgr-toolbar button:hover {
+	background: var(--background-modifier-hover);
+}
+
+/* 搜索 + 过滤栏 */
+.imagelmgr-filter-bar {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	padding: 6px 10px;
+	margin-bottom: 8px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	background: var(--background-secondary);
+}
+
+.imagelmgr-search-input {
+	flex: 1;
+	min-width: 100px;
+	padding: 4px 8px;
+	border-radius: 4px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: 12px;
+	outline: none;
+}
+
+.imagelmgr-search-input:focus {
+	border-color: var(--text-accent);
+}
+
+/* 图床选择器 */
+.imagelmgr-bed-select {
+	padding: 4px 6px;
+	border-radius: 4px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: 12px;
+	flex-shrink: 0;
+}
+
+/* 过滤按钮组 */
+.imagelmgr-filter-group {
+	display: flex;
+	gap: 2px;
+	flex-shrink: 0;
+}
+
+.imagelmgr-filter-btn {
+	padding: 3px 10px;
+	font-size: 11px;
+	border-radius: 4px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-muted);
+	cursor: pointer;
+	transition: all 0.15s;
+}
+
+.imagelmgr-filter-btn:hover {
+	background: var(--background-modifier-hover);
+}
+
+.imagelmgr-filter-btn.active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-color: var(--interactive-accent);
+}
+
+/* 统一列表 */
+.imagelmgr-list {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	overflow: hidden;
+}
+
+/* 分区标题 */
+.imagelmgr-part-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 8px 10px;
+	background: var(--background-secondary);
+	border-bottom: 1px solid var(--background-modifier-border);
+	position: sticky;
+	top: 0;
+	z-index: 1;
+}
+
+.imagelmgr-part-title {
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+.imagelmgr-part-count {
+	font-size: 11px;
+	color: var(--text-faint);
+}
+
+/* 分隔线 */
+.imagelmgr-divider {
+	height: 1px;
+	background: var(--background-modifier-border);
+}
+
+/* 列表项 */
+.imagelmgr-item {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 4px 10px;
+	flex-wrap: wrap;
+}
+
+.imagelmgr-item:hover {
+	background: var(--background-modifier-hover);
+}
+
+/* 类型标签 */
+.imagelmgr-badge {
+	font-size: 10px;
+	font-weight: 600;
+	padding: 1px 6px;
+	border-radius: 3px;
+	text-transform: uppercase;
+	flex-shrink: 0;
+}
+
+.imagelmgr-badge-local {
+	background: #2d6a4f;
+	color: #d8f3dc;
+}
+
+.imagelmgr-badge-https {
+	background: #1b4965;
+	color: #bee9e8;
+}
+
+.imagelmgr-badge-http {
+	background: #7b2d26;
+	color: #f2cc8f;
+}
+
+/* 路径 */
+.imagelmgr-path {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: var(--font-monospace);
+	font-size: 12px;
+}
+
+/* 使用次数 */
+.imagelmgr-count {
+	color: var(--text-faint);
+	font-size: 11px;
+	flex-shrink: 0;
+}
+
+/* 引用次数 */
+.imagelmgr-count-referenced {
+	color: #52b788;
+	font-weight: 500;
+}
+
+.imagelmgr-count-unref {
+	color: var(--text-faint);
+	font-style: italic;
+}
+
+/* 来源文件 */
+.imagelmgr-files {
+	color: var(--text-muted);
+	font-size: 11px;
+	flex-shrink: 0;
+	max-width: 300px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* 云端状态 */
+.imagelmgr-status {
+	font-size: 11px;
+	font-weight: 600;
+	flex-shrink: 0;
+}
+
+.imagelmgr-status-ok {
+	color: #52b788;
+}
+
+.imagelmgr-status-no {
+	color: #e63946;
+}
+
+/* 链接 */
+.imagelmgr-link {
+	color: var(--text-accent);
+	text-decoration: none;
+	font-size: 11px;
+	flex-shrink: 0;
+	cursor: pointer;
+}
+
+.imagelmgr-link:hover {
+	text-decoration: underline;
+}
+
+/* 操作按钮 */
+.imagelmgr-actions {
+	display: flex;
+	gap: 4px;
+	flex-shrink: 0;
+}
+
+.imagelmgr-btn-sm {
+	padding: 1px 8px;
+	font-size: 11px;
+	border-radius: 3px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	color: var(--text-normal);
+	cursor: pointer;
+}
+
+.imagelmgr-btn-sm:hover {
+	background: var(--background-modifier-hover);
+}
+
+.imagelmgr-btn-danger {
+	color: #e63946;
+	border-color: #e6394644;
+}
+
+.imagelmgr-btn-danger:hover {
+	background: #e6394622;
+}
+
+/* 空状态 & 加载 */
+.imagelmgr-empty {
+	color: var(--text-faint);
+	text-align: center;
+	padding: 24px 0;
+	font-size: 12px;
+}
+
+.imagelmgr-loading {
+	color: var(--text-faint);
+	text-align: center;
+	padding: 24px 0;
+	font-size: 12px;
+}
+
+/* 未引用清理栏 */
+.imagelmgr-cleanup-bar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 6px 10px;
+	background: var(--background-modifier-hover);
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.imagelmgr-cleanup-info {
+	color: var(--text-muted);
+	font-size: 12px;
+}
+
+/* 创建目录 */
+.imagelmgr-createdir-bar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 10px;
+	background: var(--background-modifier-hover);
+	border-bottom: 1px solid var(--background-modifier-border);
+	font-size: 12px;
+}
+
+.imagelmgr-createdir-input {
+	flex: 1;
+	padding: 4px 8px;
+	border-radius: 4px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: 12px;
+	outline: none;
+}
+
+.imagelmgr-createdir-input:focus {
+	border-color: var(--text-accent);
+}
+
+/* 目录树 */
+.imagelmgr-dir-header {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 6px 10px;
+	cursor: pointer;
+	user-select: none;
+}
+
+.imagelmgr-dir-header:hover {
+	background: var(--background-modifier-hover);
+}
+
+.imagelmgr-dir-arrow {
+	font-size: 10px;
+	color: var(--text-muted);
+	width: 14px;
+	text-align: center;
+	flex-shrink: 0;
+}
+
+.imagelmgr-dir-icon {
+	font-size: 14px;
+	flex-shrink: 0;
+}
+
+.imagelmgr-dir-name {
+	font-weight: 600;
+	font-size: 12px;
+	color: var(--text-normal);
+}
+
+.imagelmgr-dir-count {
+	color: var(--text-faint);
+	font-size: 11px;
+	flex-shrink: 0;
+}
+
+.imagelmgr-dir-content {
+	padding-left: 20px;
+}
+
+/* 云端文件项图标 */
+.imagelmgr-cloud-file-icon {
+	flex-shrink: 0;
+	font-size: 13px;
+}
+
+/* 图片缩略图预览 */
+.imagelmgr-thumb {
+	width: 32px;
+	height: 32px;
+	object-fit: cover;
+	border-radius: 3px;
+	flex-shrink: 0;
+	border: 1px solid var(--background-modifier-border);
+}
+
+/* 设置面板 - 图床配置说明（旧版，已替换为折叠式） */
+.imagelmgr-setting-desc {
+	padding: 8px 12px;
+	margin: 4px 0 12px 0;
+	background: var(--background-secondary);
+	border-left: 3px solid var(--text-accent);
+	border-radius: 4px;
+	font-size: 11.5px;
+	line-height: 1.7;
+	color: var(--text-muted);
+	white-space: pre-line;
+}
+
+/* 设置面板 - 折叠式图床配置 */
+.imagelmgr-collapsible {
+	margin-bottom: 8px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	overflow: hidden;
+	background: var(--background-primary);
+}
+
+.imagelmgr-collapsible-header {
+	padding: 10px 12px;
+	cursor: pointer;
+	user-select: none;
+	transition: background-color 0.15s;
+}
+
+.imagelmgr-collapsible-header:hover {
+	background: var(--background-modifier-hover);
+}
+
+/* 标题行：箭头 + 图库名称 */
+.imagelmgr-collapsible-title-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.imagelmgr-collapsible-arrow {
+	font-size: 11px;
+	color: var(--text-muted);
+	flex-shrink: 0;
+	width: 14px;
+	text-align: center;
+}
+
+.imagelmgr-collapsible-title {
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+/* 副标题（第二行说明） */
+.imagelmgr-collapsible-subtitle {
+	display: block;
+	font-size: 11.5px;
+	color: var(--text-muted);
+	margin-top: 4px;
+	padding-left: 22px;
+}
+
+.imagelmgr-collapsible-content {
+	padding: 8px 12px 16px 28px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+/* 配置步骤教程 */
+.imagelmgr-setting-guide {
+	padding: 10px 14px;
+	margin-top: 12px;
+	background: var(--background-secondary);
+	border-left: 3px solid var(--text-accent);
+	border-radius: 4px;
+	font-size: 11.5px;
+	line-height: 1.75;
+	color: var(--text-muted);
+	white-space: pre-line;
+}
+
+/* WebDAV 同步操作按钮 */
+.imagelmgr-webdav-actions {
+	display: flex;
+	gap: 8px;
+	margin-top: 12px;
+	padding-top: 10px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.imagelmgr-webdav-btn {
+	padding: 5px 14px;
+	font-size: 12px;
+	border-radius: 4px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	color: var(--text-normal);
+	cursor: pointer;
+	transition: all 0.15s;
+}
+
+.imagelmgr-webdav-btn:hover {
+	background: var(--background-modifier-hover);
+}
+
+.mod-cta.imagelmgr-webdav-btn {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-color: var(--interactive-accent);
+}
+
+/* 图床连接状态指示器 */
+.imagelmgr-bed-status {
+	font-size: 11px;
+	font-weight: 500;
+	white-space: nowrap;
+	flex-shrink: 0;
+	margin-right: auto;
+	padding: 2px 6px;
+	border-radius: 3px;
+	cursor: pointer;
+	transition: all 0.2s;
+}
+
+.imagelmgr-status-unknown {
+	color: var(--text-faint);
+}
+
+.imagelmgr-status-testing {
+	color: var(--text-muted);
+	animation: imagelmgr-pulse 1s infinite;
+}
+
+@keyframes imagelmgr-pulse {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.4; }
+}
