@@ -5,7 +5,8 @@
 
 import { App, PluginSettingTab, Setting, Notice } from "obsidian";
 import ImageLMgrPlugin from "../main";
-import { ImageBedType } from "../types";
+import { ImageBedType, QuickFilterConfig } from "../types";
+import { getBedFaviconSvg, getFilterButtonIcon, isValidSvg } from "../icons";
 
 interface BedConfig {
 	name: string;
@@ -13,6 +14,14 @@ interface BedConfig {
 	guide: string;
 	fields: { name: string; desc: string; placeholder: string; key: string; isSecret?: boolean }[];
 }
+
+/** 图床名称 → 类型映射 */
+const BED_NAME_TYPE_MAP: Record<string, ImageBedType> = {
+	"GitHub 图床": ImageBedType.GitHub,
+	"阿里云 OSS": ImageBedType.Aliyun,
+	"腾讯云 COS": ImageBedType.Tencent,
+	"其他图床": ImageBedType.Other,
+};
 
 const BED_CONFIGS: BedConfig[] = [
 	{
@@ -69,14 +78,14 @@ const BED_CONFIGS: BedConfig[] = [
 		],
 	},
 	{
-		name: "SM.MS",
-		desc: "第三方免费图床服务",
+		name: "其他图床",
+		desc: "其他网络图片（非 GitHub/阿里云/腾讯云）",
 		guide:
-			"1. 注册/登录 https://sm.ms 账号\n" +
-			"2. 进入 Dashboard → API Token → 生成 Token\n" +
-			"3. 免费版有上传频率和大小限制，建议购买 Pro 版本获得更高配额",
+			"1. 其他图床用于显示所有不属于内置图床的网络图片\n" +
+			"2. 可通过「快捷筛选」添加自定义域名按钮，添加后该域名的图片将独立显示\n" +
+			"3. 未匹配到自定义域名的图片统一归类在此",
 		fields: [
-			{ name: "API Token", desc: "从 SM.MS Dashboard 获取", placeholder: "your-token", key: "smmsToken" },
+			{ name: "API Token", desc: "SM.MS 图床 Token（可选，用于上传功能）", placeholder: "your-token", key: "smmsToken" },
 		],
 	},
 ];
@@ -118,6 +127,7 @@ export class ImageLMgrSettingTab extends PluginSettingTab {
 
 		this.renderGeneralSettings(containerEl);
 		this.renderWebdavSettings(containerEl);
+		this.renderQuickFilterSettings(containerEl);
 
 		for (const bed of BED_CONFIGS) {
 			this.renderCollapsibleBed(containerEl, bed);
@@ -145,7 +155,7 @@ export class ImageLMgrSettingTab extends PluginSettingTab {
 				.addOption(ImageBedType.GitHub, "GitHub")
 				.addOption(ImageBedType.Aliyun, "阿里云 OSS")
 				.addOption(ImageBedType.Tencent, "腾讯云 COS")
-				.addOption(ImageBedType.SmMS, "SM.MS")
+				.addOption(ImageBedType.Other, "其他图床")
 				.setValue(this.plugin.settings.defaultBed)
 				.onChange((value) => {
 					this.plugin.settings.defaultBed = value as ImageBedType;
@@ -493,6 +503,173 @@ export class ImageLMgrSettingTab extends PluginSettingTab {
 		}
 	}
 
+	// ========== 快捷筛选按钮 ==========
+
+	private renderQuickFilterSettings(container: HTMLElement) {
+		const collapsible = container.createDiv({ cls: "imagelmgr-collapsible" });
+
+		const header = collapsible.createDiv({ cls: "imagelmgr-collapsible-header" });
+		const titleRow = header.createDiv({ cls: "imagelmgr-collapsible-title-row" });
+		titleRow.createSpan({ cls: "imagelmgr-collapsible-arrow", text: "▶" });
+		titleRow.createSpan({ cls: "imagelmgr-collapsible-title", text: "快捷筛选" });
+		header.createSpan({ cls: "imagelmgr-collapsible-subtitle", text: "自定义工具栏筛选按钮的显示、名称与图标" });
+
+		const content = collapsible.createDiv({ cls: "imagelmgr-collapsible-content" });
+		content.style.display = "none";
+
+		const desc = content.createDiv({ text: "控制每个筛选按钮是否显示，以及按钮上的文字标签：", cls: "setting-item-description" });
+		desc.style.marginBottom = "8px";
+
+		/** 内置 key（不可删除） */
+		const BUILTIN_KEYS = ["local", ImageBedType.GitHub, ImageBedType.Aliyun, ImageBedType.Tencent, ImageBedType.Other];
+
+		for (let i = 0; i < this.plugin.settings.quickFilterButtons.length; i++) {
+			this.renderFilterButtonRow(content, BUILTIN_KEYS, i);
+		}
+
+		// ========== 新增自定义图床 ==========
+		content.createDiv({ cls: "imagelmgr-section-heading", text: "自定义筛选按钮" });
+		const addArea = content.createDiv({ cls: "imagelmgr-add-area" });
+
+		let domainInput: HTMLInputElement;
+		let labelInput: HTMLInputElement;
+		let addCustomSvgEl: HTMLTextAreaElement;
+
+		new Setting(addArea)
+			.setName("域名")
+			.setDesc("例如 www.baidu.com 或 img.example.com")
+			.addText((text) => {
+				domainInput = text.inputEl;
+				text.setPlaceholder("www.example.com");
+			})
+			.addButton((btn) => btn
+				.setButtonText("添加")
+				.onClick(async () => {
+					let domain = domainInput.value.trim().toLowerCase();
+					if (!domain) { new Notice("请输入域名"); domainInput.focus(); return; }
+					domain = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+					if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(domain)) {
+						new Notice(`"${domain}" 不是有效的域名格式`); domainInput.focus(); return;
+					}
+					if (this.plugin.settings.quickFilterButtons.some((b) => b.key === domain)) {
+						new Notice(`域名 "${domain}" 已存在`); return;
+					}
+					const newBtn: QuickFilterConfig = {
+						key: domain as any,
+						label: labelInput.value.trim() || domain,
+						enabled: true,
+						icon: isValidSvg(addCustomSvgEl.value) ? addCustomSvgEl.value : undefined,
+					};
+					this.plugin.settings.quickFilterButtons.push(newBtn);
+					domainInput.value = "";
+					labelInput.value = "";
+					addCustomSvgEl.value = "";
+					await this.plugin.saveSettings();
+					this.renderQuickFilterSettings(container);
+					new Notice(`已添加: ${newBtn.label}`);
+				}));
+
+		new Setting(addArea)
+			.setName("按钮名称")
+			.setDesc("留空则自动使用域名作为名称")
+			.addText((text) => {
+				labelInput = text.inputEl;
+				text.setPlaceholder("自定义名称");
+			});
+
+		new Setting(addArea)
+			.setName("自定义图标")
+			.setDesc("可选，粘贴 SVG 代码或留空使用默认图标")
+			.addTextArea((text) => {
+				addCustomSvgEl = text.inputEl;
+				addCustomSvgEl.addClass("imagelmgr-custom-svg-input");
+				text.setPlaceholder('粘贴自定义 SVG 代码');
+			});
+
+		// 折叠/展开事件
+		const arrowEl = titleRow.querySelector(".imagelmgr-collapsible-arrow") as HTMLSpanElement;
+		header.addEventListener("click", () => {
+			const isOpen = content.style.display !== "none";
+			content.style.display = isOpen ? "none" : "";
+			if (arrowEl) arrowEl.textContent = isOpen ? "▶" : "▼";
+		});
+	}
+
+	/** 渲染单个筛选按钮配置行 */
+	private renderFilterButtonRow(content: HTMLElement, BUILTIN_KEYS: string[], idx: number) {
+		const btnCfg = this.plugin.settings.quickFilterButtons[idx];
+		const isCustom = !BUILTIN_KEYS.includes(btnCfg.key);
+		const row = content.createDiv({ cls: "imagelmgr-quickfilter-row" });
+
+		// 图标预览（左侧）
+		this.updateRowIcon(row, btnCfg);
+
+		const body = row.createDiv({ cls: "imagelmgr-qf-body" });
+		let customSvgEl: HTMLTextAreaElement | null = null;
+
+		if (isCustom) {
+			// 自定义域名：显示名称（带删除按钮）+ SVG 文本框
+			new Setting(body)
+				.setName("名称")
+				.setDesc("按钮显示的文字标签")
+				.addText((text) => text
+					.setPlaceholder("按钮名称")
+					.setValue(btnCfg.label)
+					.onChange(async (value) => {
+						btnCfg.label = value;
+						await this.plugin.saveSettings();
+						this.updateRowIcon(row, btnCfg);
+					}))
+				.addButton((btn) => btn
+					.setButtonText("×")
+					.setTooltip("删除此图床")
+					.onClick(async () => {
+						this.plugin.settings.quickFilterButtons.splice(idx, 1);
+						await this.plugin.saveSettings();
+						this.renderQuickFilterSettings(content.parentElement!);
+					}));
+
+			new Setting(body)
+				.setName("自定义图标")
+				.setDesc("留空使用默认图标")
+				.addTextArea((text) => {
+					customSvgEl = text.inputEl;
+					customSvgEl.addClass("imagelmgr-custom-svg-input");
+					text.setPlaceholder('粘贴自定义 SVG 代码');
+					text.setValue(isValidSvg(btnCfg.icon) ? btnCfg.icon! : "");
+					text.onChange(async (value) => {
+						btnCfg.icon = value || "";
+						await this.plugin.saveSettings();
+						this.updateRowIcon(row, btnCfg);
+					});
+				});
+		} else {
+			// 内置图床：只显示名称标签
+			body.createEl("span", { cls: "imagelmgr-builtin-label", text: btnCfg.label });
+		}
+
+		// 右侧操作区：开关 + 删除
+		const actions = row.createDiv({ cls: "imagelmgr-qf-actions" });
+
+		new Setting(actions)
+			.setName("")
+			.setDesc("")
+			.addToggle((toggle) => toggle
+				.setValue(btnCfg.enabled)
+				.onChange(async (value) => {
+					btnCfg.enabled = value;
+					await this.plugin.saveSettings();
+				}));
+	}
+
+	/** 更新行左侧的图标预览 */
+	private updateRowIcon(row: HTMLDivElement, cfg: QuickFilterConfig) {
+		const svg = getFilterButtonIcon(cfg);
+		const existingIcon = row.querySelector(".imagelmgr-bed-icon");
+		if (existingIcon) existingIcon.innerHTML = svg;
+		else row.insertAdjacentHTML("afterbegin", `<span class="imagelmgr-bed-icon">${svg}</span>`);
+	}
+
 	// ========== 图床折叠卡片 ==========
 
 	private renderCollapsibleBed(container: HTMLElement, config: BedConfig) {
@@ -501,6 +678,14 @@ export class ImageLMgrSettingTab extends PluginSettingTab {
 		const header = collapsible.createDiv({ cls: "imagelmgr-collapsible-header" });
 		const titleRow = header.createDiv({ cls: "imagelmgr-collapsible-title-row" });
 		const arrow = titleRow.createSpan({ cls: "imagelmgr-collapsible-arrow", text: "▶" });
+
+		// 图床图标
+		const bedType = BED_NAME_TYPE_MAP[config.name];
+		if (bedType) {
+			const iconSpan = titleRow.createSpan({ cls: "imagelmgr-bed-icon" });
+			iconSpan.innerHTML = getBedFaviconSvg(bedType);
+		}
+
 		titleRow.createSpan({ cls: "imagelmgr-collapsible-title", text: config.name });
 		header.createSpan({ cls: "imagelmgr-collapsible-subtitle", text: config.desc });
 

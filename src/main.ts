@@ -47,6 +47,15 @@ const DEFAULT_SETTINGS: ImageLMgrSettings = {
 	tencentBucket: "",
 	tencentRegion: "",
 	smmsToken: "",
+
+	// 快捷筛选按钮（默认全部启用）
+	quickFilterButtons: [
+		{ key: "local", label: "本地图片", enabled: true },
+		{ key: ImageBedType.GitHub, label: "GitHub", enabled: true },
+		{ key: ImageBedType.Aliyun, label: "阿里云 OSS", enabled: true },
+		{ key: ImageBedType.Tencent, label: "腾讯云 COS", enabled: true },
+		{ key: ImageBedType.Other, label: "其他图床", enabled: true },
+	],
 };
 
 export default class ImageLMgrPlugin extends Plugin {
@@ -155,7 +164,7 @@ export default class ImageLMgrPlugin extends Plugin {
 
 		const smms = new SmmsImageBed();
 		smms.configure(this.settings);
-		this.imageBedManager.register(ImageBedType.SmMS, smms);
+		this.imageBedManager.register(ImageBedType.Other, smms);
 	}
 
 	async activateView() {
@@ -187,7 +196,7 @@ export default class ImageLMgrPlugin extends Plugin {
 		if (this.debounceTimer) clearTimeout(this.debounceTimer);
 		this.debounceTimer = setTimeout(() => {
 			this.refreshView();
-		}, 500);
+		}, this.settings.debounceDelay);
 	}
 
 	refreshView() {

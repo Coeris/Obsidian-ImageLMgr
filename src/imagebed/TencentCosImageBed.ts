@@ -89,8 +89,8 @@ export class TencentCosImageBed implements ImageBed {
 		const keyData = encoder.encode(this.secretKey);
 		const data = encoder.encode(stringToSign);
 
-		const cryptoKey = await subtle.importKey("raw", keyData, { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
-		const sigBuffer = await subtle.sign("HMAC", cryptoKey, data);
+		const cryptoKey = await cryptoSubtle.importKey("raw", keyData, { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
+		const sigBuffer = await cryptoSubtle.sign("HMAC", cryptoKey, data);
 		const sigArray = new Uint8Array(sigBuffer);
 		let binary = "";
 		for (let i = 0; i < sigArray.length; i++) {
