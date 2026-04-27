@@ -21,6 +21,15 @@ export interface ImageLink {
 	resolvedPath?: string;
 }
 
+/** 快捷筛选按钮配置 */
+export interface QuickFilterConfig {
+	key: "local" | ImageBedType | string;
+	label: string;
+	enabled: boolean;
+	/** 自定义图标（内联 SVG）；为空则根据 key 自动匹配 */
+	icon?: string;
+}
+
 export interface ImageLMgrSettings {
 	// ========== 插件通用设置 ==========
 	/** 默认图床类型 */
@@ -61,13 +70,16 @@ export interface ImageLMgrSettings {
 	tencentBucket: string;
 	tencentRegion: string;
 	smmsToken: string;
+
+	// ========== 快捷筛选 ==========
+	quickFilterButtons: QuickFilterConfig[];
 }
 
 export enum ImageBedType {
 	GitHub = "GitHub",
 	Aliyun = "阿里云 OSS",
 	Tencent = "腾讯云 COS",
-	SmMS = "SM.MS",
+	Other = "其他图床",
 }
 
 export interface CloudFile {

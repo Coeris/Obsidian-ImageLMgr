@@ -24,15 +24,38 @@
 .imagelmgr-toolbar button {
 	padding: 4px 12px;
 	border-radius: 4px;
-	border: 1px solid var(--background-modifier-border);
-	background: var(--background-secondary);
-	color: var(--text-normal);
+	border: none;
+	background: transparent;
+	color: var(--text-muted);
 	cursor: pointer;
 	font-size: 12px;
+	transition: color 0.15s, background 0.15s;
 }
 
 .imagelmgr-toolbar button:hover {
 	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+/* 刷新按钮加载状态 */
+.imagelmgr-refresh-btn.loading {
+	opacity: 0.5;
+	pointer-events: none;
+}
+
+/* 刷新时内容区淡入淡出 */
+.imagelmgr-container.refreshing {
+	opacity: 0.3;
+	transition: opacity 0.2s ease;
+}
+
+.imagelmgr-container.refreshed {
+	animation: imagelmgr-fade-in 0.3s ease;
+}
+
+@keyframes imagelmgr-fade-in {
+	from { opacity: 0; }
+	to   { opacity: 1; }
 }
 
 /* 搜索 + 过滤栏 */
@@ -102,6 +125,13 @@
 	border-color: var(--interactive-accent);
 }
 
+.imagelmgr-filter-icon {
+	display: inline-flex;
+	align-items: center;
+	margin-right: 2px;
+	flex-shrink: 0;
+}
+
 /* 统一列表 */
 .imagelmgr-list {
 	border: 1px solid var(--background-modifier-border);
@@ -126,6 +156,13 @@
 	font-size: 13px;
 	font-weight: 600;
 	color: var(--text-normal);
+}
+
+.imagelmgr-part-icon {
+	display: inline-flex;
+	align-items: center;
+	margin-right: 4px;
+	flex-shrink: 0;
 }
 
 .imagelmgr-part-count {
@@ -160,6 +197,13 @@
 	border-radius: 3px;
 	text-transform: uppercase;
 	flex-shrink: 0;
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+}
+
+.imagelmgr-badge-text {
+	line-height: normal;
 }
 
 .imagelmgr-badge-local {
@@ -188,6 +232,14 @@
 	font-size: 12px;
 }
 
+.imagelmgr-path.clickable {
+	cursor: pointer;
+}
+
+.imagelmgr-path.clickable:hover {
+	color: var(--text-accent);
+}
+
 /* 使用次数 */
 .imagelmgr-count {
 	color: var(--text-faint);
@@ -205,6 +257,40 @@
 	color: var(--text-faint);
 	font-style: italic;
 }
+
+/* 来源文件标签（逐个显示） */
+.imagelmgr-file-tag {
+	font-size: 10.5px;
+	padding: 1px 6px;
+	border-radius: 3px;
+	background: var(--background-modifier-border);
+	color: var(--text-muted);
+	flex-shrink: 0;
+	cursor: default;
+	max-width: 140px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	vertical-align: middle;
+}
+
+.imagelmgr-file-tag-more {
+	color: var(--text-faint);
+	font-weight: 600;
+	min-width: 22px;
+	text-align: center;
+}
+
+.imagelmgr-file-tag.clickable {
+	cursor: pointer;
+}
+
+.imagelmgr-file-tag.clickable:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+
 
 /* 来源文件 */
 .imagelmgr-files {
@@ -390,6 +476,54 @@
 	border: 1px solid var(--background-modifier-border);
 }
 
+/* 图床网站图标（内联 SVG） */
+.imagelmgr-bed-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	width: 14px;
+	height: 14px;
+	vertical-align: middle;
+}
+
+/* 图床筛选按钮组 */
+.imagelmgr-bed-filter-group {
+	display: flex;
+	gap: 2px;
+	flex-shrink: 0;
+}
+
+.imagelmgr-bed-filter-btn {
+	display: flex !important;
+	align-items: center;
+	gap: 3px;
+	padding: 3px 10px;
+	font-size: 11px;
+	border-radius: 4px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-muted);
+	cursor: pointer;
+	transition: all 0.15s;
+}
+
+.imagelmgr-bed-filter-btn:hover {
+	background: var(--background-modifier-hover);
+}
+
+.imagelmgr-bed-filter-btn.active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-color: var(--interactive-accent);
+}
+
+.imagelmgr-no-beds {
+	font-size: 11px;
+	color: var(--text-faint);
+	line-height: 26px;
+}
+
 /* 设置面板 - 图床配置说明（旧版，已替换为折叠式） */
 .imagelmgr-setting-desc {
 	padding: 8px 12px;
@@ -526,4 +660,165 @@
 @keyframes imagelmgr-pulse {
 	0%, 100% { opacity: 1; }
 	50% { opacity: 0.4; }
+}
+
+/* 快捷筛选按钮配置行 */
+.imagelmgr-quickfilter-row {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	padding: 10px 12px;
+	margin-bottom: 8px;
+	border-radius: 8px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.imagelmgr-quickfilter-row:hover {
+	border-color: var(--background-modifier-border-hover);
+	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+/* 图标预览区域（行左侧） */
+.imagelmgr-quickfilter-row > .imagelmgr-bed-icon:first-child {
+	width: 28px;
+	height: 28px;
+	padding: 4px;
+	border-radius: 6px;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	flex-shrink: 0;
+	margin-top: 2px;
+}
+
+.imagelmgr-quickfilter-row > .imagelmgr-bed-icon:first-child svg {
+	width: 20px !important;
+	height: 20px !important;
+}
+
+/* 行内内容区域 */
+.imagelmgr-qf-body {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+/* 内置图床：只显示纯文本标签 */
+.imagelmgr-builtin-label {
+	font-size: 13px;
+	font-weight: 500;
+	color: var(--text-normal);
+	line-height: 32px; /* 与图标预览高度对齐 */
+}
+
+.imagelmgr-qf-body .setting-item {
+	padding: 2px 0;
+	border: none;
+}
+
+.imagelmgr-qf-body .setting-item-info {
+	flex-shrink: 0;
+}
+
+/* 右侧操作区（开关 + 删除） */
+.imagelmgr-qf-actions {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	flex-shrink: 0;
+	padding-top: 6px;
+}
+
+.imagelmgr-qf-actions .setting-item {
+	padding: 0;
+	border: none;
+}
+
+.imagelmgr-quickfilter-row .setting-item {
+	flex: 0 0 auto;
+	min-width: 0;
+	padding: 0;
+	border: none;
+}
+
+.imagelmgr-quickfilter-row .setting-item-info {
+	flex-shrink: 0;
+}
+
+.imagelmgr-quickfilter-row .setting-item-control {
+	gap: 6px;
+	align-items: flex-start;
+}
+
+/* 自定义 SVG 代码输入框 */
+.imagelmgr-custom-svg-input {
+	width: 100%;
+	min-height: 48px;
+	max-height: 100px;
+	padding: 7px 10px;
+	margin-top: 5px;
+	font-size: 11px;
+	line-height: 1.45;
+	font-family: var(--font-monospace);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	border: 1px dashed var(--background-modifier-border);
+	border-radius: 6px;
+	resize: vertical;
+	outline: none;
+	white-space: pre-wrap;
+	word-break: break-all;
+	transition: border-color 0.15s;
+}
+
+.imagelmgr-custom-svg-input:focus {
+	border-color: var(--text-accent);
+	border-style: solid;
+}
+
+.imagelmgr-custom-svg-input::placeholder {
+	color: var(--text-faint);
+	font-style: italic;
+}
+
+/* 新增图床区域标题 */
+.imagelmgr-section-heading {
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--text-normal);
+	padding: 14px 0 8px 2px;
+	letter-spacing: 0.02em;
+}
+
+/* 新增区域输入容器 */
+.imagelmgr-add-area {
+	padding: 10px 12px;
+	margin-top: 6px;
+	border-radius: 8px;
+	border: 1px dashed var(--background-modifier-border);
+	background: var(--background-secondary);
+}
+
+/* 删除按钮样式（内联在名称行中） */
+.imagelmgr-qf-body button {
+	width: auto;
+	height: auto;
+	padding: 2px 8px;
+	font-size: 16px;
+	line-height: 1;
+	border-radius: 4px;
+	border: none;
+	background: transparent;
+	color: var(--text-faint);
+	cursor: pointer;
+	transition: all 0.15s;
+	flex-shrink: 0;
+}
+
+.imagelmgr-qf-body button:hover {
+	background: var(--interactive-error-hover);
+	color: var(--interactive-error);
 }

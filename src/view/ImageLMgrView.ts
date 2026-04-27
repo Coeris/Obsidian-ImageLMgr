@@ -3,11 +3,12 @@
  * 单栏布局：本地图片（含云端状态）+ 云端未引用文件
  */
 
-import { ItemView, WorkspaceLeaf, Notice } from "obsidian";
+import { ItemView, WorkspaceLeaf, Notice, TFile } from "obsidian";
 import ImageLMgrPlugin from "../main";
-import { ImageLink, ImageBedType, CloudFile } from "../types";
+import { ImageLink, ImageBedType, CloudFile, QuickFilterConfig } from "../types";
 import { extractFileName } from "../comparator/CloudComparator";
 import { parseFrontmatter } from "../utils/FrontmatterParser";
+import { detectBedTypeFromUrl, getBedFaviconSvg, LOCAL_ICON_SVG, getFilterButtonIcon, BUILTIN_BED_TYPES } from "../icons";
 
 export const VIEW_TYPE_IMAGE_LMGR = "imagelmgr";
 
@@ -17,20 +18,21 @@ const IMAGE_EXTENSIONS = new Set([
 ]);
 
 /** 过滤模式 */
-type FilterMode = "all" | "local" | "uploaded" | "unuploaded";
 
 export class ImageLMgrView extends ItemView {
 	private plugin: ImageLMgrPlugin;
 	private localImages: ImageLink[] = [];
 	private vaultImagesMap = new Map<string, ImageLink>();
 	private cloudFiles: CloudFile[] = [];
-	private selectedBed: ImageBedType = ImageBedType.Aliyun;
-	/** 本地图片云端比对结果缓存 */
-	private compareResult = new Map<string, { exists: boolean; url?: string }>();
+	/** 当前选中的图床（用于上传/删除等操作，来自全局设置默认值） */
+	private selectedBed: ImageBedType;
+	/** 本地图片云端比对结果缓存（跨所有图床） */
+	private compareResult = new Map<string, { exists: boolean; url?: string; bedType?: ImageBedType }>();
 
 	/** 过滤状态 */
 	private searchKeyword = "";
-	private filterMode: FilterMode = "all";
+	/** 当前激活的筛选：null=显示全部, "local"=仅本地, 其他=对应图床/自定义域名 */
+	private activeFilter: "local" | ImageBedType | (string & {}) | null = null;
 
 	/** 文件名 → 引用次数映射 */
 	private fileNameRefCount = new Map<string, number>();
@@ -38,9 +40,16 @@ export class ImageLMgrView extends ItemView {
 	/** #6 图床连接状态指示器元素 */
 	private bedStatusEl: HTMLSpanElement | null = null;
 
+	/** 动态图床筛选按钮容器 */
+	private bedFilterGroupEl: HTMLDivElement | null = null;
+
+	/** 标签滑动窗口焦点：key=图片pure路径, value=当前居中的文件索引 */
+	private tagFocusMap: Map<string, number> = new Map();
+
 	constructor(leaf: WorkspaceLeaf, plugin: ImageLMgrPlugin) {
 		super(leaf);
 		this.plugin = plugin;
+		this.selectedBed = plugin.settings.defaultBed || ImageBedType.Aliyun;
 	}
 
 	getViewType(): string {
@@ -56,7 +65,7 @@ export class ImageLMgrView extends ItemView {
 	}
 
 	async onOpen() {
-		const container = this.containerEl.children[1];
+		const container = this.containerEl.children[1] as HTMLElement;
 		container.empty();
 		container.addClass("imagelmgr-container");
 
@@ -78,21 +87,52 @@ export class ImageLMgrView extends ItemView {
 	async refresh() {
 		this.vaultImagesMap = await this.plugin.getVaultImages();
 		this.localImages = Array.from(this.vaultImagesMap.values());
+		// 按 Obsidian 默认字母序排序
+		this.localImages.sort((a, b) => (a.resolvedPath || a.pure).localeCompare(b.resolvedPath || b.pure));
 		this.fileNameRefCount = this.buildFileNameRefCount();
+
+
 
 		// #6 刷新时自动检测连接状态
 		this.testCurrentBed();
 
-		// 并行请求云端列表和比对
-		const [cloudFiles, compareResult] = await Promise.all([
-			this.plugin.listCloudFiles(this.selectedBed),
-			this.plugin.compareLocalWithCloud(this.localImages, this.selectedBed),
-		]);
-		this.cloudFiles = cloudFiles;
-		this.compareResult = compareResult;
+		// 跨所有已配置图床进行比对，合并结果
+		const allCompareResult = new Map<string, { exists: boolean; url?: string; bedType?: ImageBedType }>();
+		const allCloudFiles: CloudFile[] = [];
 
+		for (const bedType of Object.values(ImageBedType)) {
+			try {
+				const [cloudFiles, compareResult] = await Promise.all([
+					this.plugin.listCloudFiles(bedType),
+					this.plugin.compareLocalWithCloud(this.localImages, bedType),
+				]);
+				allCloudFiles.push(...cloudFiles);
+				// 合并比对结果：记录每条本地图片在哪个图床存在及对应URL
+				for (const [key, val] of compareResult.entries()) {
+					if (val.exists && !allCompareResult.has(key)) {
+						allCompareResult.set(key, { ...val, bedType });
+					}
+				}
+			} catch { /* 该图床未配置或请求失败，跳过 */ }
+		}
+
+		this.cloudFiles = allCloudFiles;
+		this.compareResult = allCompareResult;
+
+		// 更新动态图床筛选按钮
+		this.renderFilterIcons();
 		this.renderContent();
 	}
+
+	/**
+	 * 获取已启用的快捷筛选按钮列表
+	 */
+	private getEnabledFilters(): QuickFilterConfig[] {
+		return (this.plugin.settings.quickFilterButtons || []).filter((cfg) => cfg.enabled);
+	}
+
+	/** 内置图床类型集合（用于区分自定义域名） */
+	private static readonly BUILTIN_BEDS = BUILTIN_BED_TYPES;
 
 	// ==================== #6 图床连接健康检测 ====================
 
@@ -123,15 +163,30 @@ export class ImageLMgrView extends ItemView {
 		this.bedStatusEl.style.cursor = "pointer";
 		this.bedStatusEl.addEventListener("click", () => this.testCurrentBed());
 
-		const refreshBtn = toolbar.createEl("button", { text: "刷新" });
+		const refreshBtn = toolbar.createEl("button", { text: "🔄 刷新", cls: "imagelmgr-refresh-btn" });
 		refreshBtn.addEventListener("click", async () => {
-			refreshBtn.textContent = "刷新中...";
+			refreshBtn.textContent = "⏳ 刷新中...";
 			refreshBtn.disabled = true;
+			refreshBtn.classList.add("loading");
+			this.tagFocusMap.clear();
+
+			// 淡出
+			const container = this.containerEl.querySelector(".imagelmgr-container") as HTMLElement | null;
+			container?.classList.add("refreshing");
+
 			try {
+				await new Promise(r => setTimeout(r, 200)); // 等待淡出完成
 				await this.refresh();
+			} catch (e) {
+				new Notice(`刷新失败: ${e instanceof Error ? e.message : String(e)}`);
 			} finally {
-				refreshBtn.textContent = "刷新";
+				container?.classList.remove("refreshing");
+				container?.classList.add("refreshed");
+				setTimeout(() => container?.classList.remove("refreshed"), 300);
+
+				refreshBtn.textContent = "🔄 刷新";
 				refreshBtn.disabled = false;
+				refreshBtn.classList.remove("loading");
 			}
 		});
 
@@ -153,41 +208,9 @@ export class ImageLMgrView extends ItemView {
 			this.renderContent();
 		});
 
-		// 图床选择器
-		const bedSelector = filterBar.createEl("select", { cls: "imagelmgr-bed-select" });
-		for (const type of Object.values(ImageBedType)) {
-			const option = bedSelector.createEl("option", { value: type, text: type });
-			if (type === this.selectedBed) option.selected = true;
-		}
-		bedSelector.addEventListener("change", async (e) => {
-			this.selectedBed = (e.target as HTMLSelectElement).value as ImageBedType;
-			this.cloudFiles = await this.plugin.listCloudFiles(this.selectedBed);
-			this.compareResult = await this.plugin.compareLocalWithCloud(this.localImages, this.selectedBed);
-			this.renderContent();
-		});
-
-		// 过滤按钮组
-		const filterGroup = filterBar.createDiv({ cls: "imagelmgr-filter-group" });
-		const filters: { mode: FilterMode; label: string }[] = [
-			{ mode: "all", label: "全部" },
-			{ mode: "local", label: "本地" },
-			{ mode: "uploaded", label: "已上传" },
-			{ mode: "unuploaded", label: "未上传" },
-		];
-		for (const f of filters) {
-			const btn = filterGroup.createEl("button", {
-				text: f.label,
-				cls: `imagelmgr-filter-btn ${f.mode === this.filterMode ? "active" : ""}`,
-				attr: { "data-filter": f.mode },
-			});
-			btn.addEventListener("click", () => {
-				this.filterMode = f.mode;
-				filterGroup.querySelectorAll(".imagelmgr-filter-btn").forEach((el) => {
-					el.classList.toggle("active", (el as HTMLElement).dataset.filter === f.mode);
-				});
-				this.renderContent();
-			});
-		}
+		// 图标筛选按钮组（本地图标 + 动态检测到的图床）
+		this.bedFilterGroupEl = filterBar.createDiv({ cls: "imagelmgr-filter-group imagelmgr-bed-filter-group" });
+		this.renderFilterIcons();
 
 		// 统一列表
 		const list = container.createDiv({ cls: "imagelmgr-list", attr: { id: "imagelmgr-main-list" } });
@@ -215,6 +238,8 @@ export class ImageLMgrView extends ItemView {
 
 			// 分区标题
 			const localHeader = el.createDiv({ cls: "imagelmgr-part-header" });
+			const localIcon = localHeader.createSpan({ cls: "imagelmgr-part-icon" });
+			localIcon.innerHTML = LOCAL_ICON_SVG;
 			localHeader.createSpan({ text: "本地图片", cls: "imagelmgr-part-title" });
 			localHeader.createSpan({
 				text: `${uploadedCount} 已上传 / ${filteredLocal.length - uploadedCount} 未上传`,
@@ -235,6 +260,8 @@ export class ImageLMgrView extends ItemView {
 			el.createDiv({ cls: "imagelmgr-divider" });
 
 			const cloudHeader = el.createDiv({ cls: "imagelmgr-part-header" });
+			const cloudIcon = cloudHeader.createSpan({ cls: "imagelmgr-part-icon" });
+			cloudIcon.innerHTML = `<svg viewBox="0 0 1024 1024" width="14" height="14"><path fill="#5C7CFA" d="M811.2 456.8c-19.6-118.4-124-208.8-247.2-208.8-108 0-201.6 70-233.6 168.4C196 430 88 544 88 681.6c0 142 114.8 256.8 256 256.8h440c116 0 210-94 210-209.6 0-110-84.8-200.8-192.8-212z"/></svg>`;
 			cloudHeader.createSpan({ text: "云端未引用文件", cls: "imagelmgr-part-title" });
 			cloudHeader.createSpan({
 				text: `${filteredCloud.length} 个`,
@@ -278,25 +305,97 @@ export class ImageLMgrView extends ItemView {
 		const isUploaded = result?.exists;
 		const item = container.createDiv({ cls: "imagelmgr-item" });
 
-		// 类型标签
-		item.createSpan({ cls: `imagelmgr-badge imagelmgr-badge-${img.type}`, text: img.type });
+		// 类型图标（无背景、无文字）
+		const iconSpan = item.createSpan({ cls: "imagelmgr-bed-icon" });
+		if (img.type === "local") {
+			iconSpan.innerHTML = LOCAL_ICON_SVG;
+		} else {
+			const bedType = detectBedTypeFromUrl(img.pure);
+		iconSpan.innerHTML = getBedFaviconSvg(bedType);
+		}
 
-		// 文件名（使用解析后的库内路径）
+		// 文件名（完整显示，根目录用"根目录"标识）
 		const displayPath = img.resolvedPath || img.pure;
-		item.createSpan({ cls: "imagelmgr-path", text: displayPath, title: img.pure });
+		const parts = displayPath.split("/");
+		let shortPath: string;
+		if (parts.length <= 1) {
+			// 根目录文件
+			shortPath = `根目录/${displayPath}`;
+		} else {
+			// 子目录文件：直接显示完整路径
+			shortPath = displayPath;
+		}
+		const pathSpan = item.createSpan({ cls: "imagelmgr-path", text: shortPath, title: "双击复制图片路径" });
+		pathSpan.classList.add("clickable");
 
-		// 使用次数
-		item.createSpan({ cls: "imagelmgr-count", text: `${img.count}次` });
+		// 双击路径 → 复制图片路径
+		pathSpan.addEventListener("dblclick", () => this.copyImagePath(img));
 
-		// 来源文件
+		// 来源文件：滑动窗口模式，最多显示3个标签，点击后居中
+		const WINDOW_SIZE = 3;
 		if (img.files.length > 0) {
-			const filesSpan = item.createSpan({ cls: "imagelmgr-files", text: `← ${img.files.join(", ")}` });
-			filesSpan.title = img.files.join("\n");
+			// 获取或初始化焦点索引（默认居中）
+			let focusIdx = this.tagFocusMap.get(img.pure) ?? Math.min(1, img.files.length - 1);
+			focusIdx = Math.max(0, Math.min(focusIdx, img.files.length - 1));
+
+			const half = Math.floor(WINDOW_SIZE / 2);
+			let start = focusIdx - half;
+			let end = start + WINDOW_SIZE;
+
+			// 边界修正：靠左/靠右时窗口不移出范围
+			if (start < 0) { start = 0; end = WINDOW_SIZE; }
+			if (end > img.files.length) { end = img.files.length; start = Math.max(0, end - WINDOW_SIZE); }
+
+			const leftMore = start;                    // 左边隐藏数
+			const rightMore = img.files.length - end;   // 右边隐藏数
+
+			// 左侧 +N（0不显示）
+			if (leftMore > 0) {
+				const leftTag = item.createSpan({ cls: "imagelmgr-file-tag imagelmgr-file-tag-more", text: `+${leftMore}` });
+				leftTag.classList.add("clickable");
+				leftTag.addEventListener("click", () => {
+					this.tagFocusMap.set(img.pure, start - 1);
+					this.refresh();
+				});
+			}
+
+			// 窗口内的标签
+			for (let i = start; i < end; i++) {
+				const f = img.files[i];
+				const isFocus = (i === focusIdx);
+				const tag = item.createSpan({
+					cls: `imagelmgr-file-tag${isFocus ? " imagelmgr-file-tag-focus" : ""}`,
+					text: f,
+				});
+				tag.title = `双击跳转到 ${f}`;
+				tag.classList.add("clickable");
+				tag.addEventListener("click", () => {
+					this.tagFocusMap.set(img.pure, i);
+					this.refresh();
+				});
+				tag.addEventListener("dblclick", () => this.jumpToFile(img, f));
+			}
+
+			// 右侧 +N
+			if (rightMore > 0) {
+				const rightTag = item.createSpan({ cls: "imagelmgr-file-tag imagelmgr-file-tag-more", text: `+${rightMore}` });
+				rightTag.classList.add("clickable");
+				rightTag.addEventListener("click", () => {
+					this.tagFocusMap.set(img.pure, end);
+					this.refresh();
+				});
+			}
 		}
 
 		// 云端状态
 		if (isUploaded) {
 			item.createSpan({ cls: "imagelmgr-status imagelmgr-status-ok", text: "已上传" });
+			// 根据云端链接域名显示对应图床图标（内联 SVG）
+			const bedType = result.url ? detectBedTypeFromUrl(result.url) : null;
+			if (bedType) {
+				const svg = item.createEl("span", { cls: "imagelmgr-bed-icon", title: bedType });
+				svg.innerHTML = getBedFaviconSvg(bedType);
+			}
 			if (result.url) {
 				const link = item.createEl("a", {
 					cls: "imagelmgr-link",
@@ -317,20 +416,19 @@ export class ImageLMgrView extends ItemView {
 				uploadBtn.addEventListener("click", () => this.uploadSingleImage(img));
 			}
 		}
-
-		// 双击跳转
-		if (img.files.length > 0) {
-			item.addEventListener("dblclick", () => {
-				this.openFileAtLine(img.files[0], img.line);
-			});
-			item.style.cursor = "pointer";
-		}
 	}
 
 	// ==================== 云端文件项 ====================
 
 	private renderCloudItem(container: HTMLElement, file: CloudFile, indent: string = "") {
 		const item = container.createDiv({ cls: "imagelmgr-item" });
+
+		// 根据云端链接域名显示对应图床图标（内联 SVG）
+		const cloudBedType = detectBedTypeFromUrl(file.url);
+		if (cloudBedType) {
+			const svg = item.createEl("span", { cls: "imagelmgr-bed-icon", title: cloudBedType });
+			svg.innerHTML = getBedFaviconSvg(cloudBedType);
+		}
 
 		const ext = this.getFileExtension(file.name);
 		const isImage = IMAGE_EXTENSIONS.has(ext);
@@ -359,7 +457,7 @@ export class ImageLMgrView extends ItemView {
 		insertBtn.addEventListener("click", () => this.insertUrl(file.url));
 
 		const deleteBtn = actions.createEl("button", { text: "删除", cls: "imagelmgr-btn-sm imagelmgr-btn-danger" });
-		deleteBtn.addEventListener("click", () => this.deleteCloudFile(file.prefix || file.name));
+		deleteBtn.addEventListener("click", () => { if (cloudBedType) this.deleteCloudFile(file.prefix || file.name, cloudBedType); });
 	}
 
 	private renderCloudWithDirectories(el: HTMLElement, files: CloudFile[]) {
@@ -409,7 +507,58 @@ export class ImageLMgrView extends ItemView {
 		}
 	}
 
+	// ==================== 动态图床筛选按钮 ====================
+
+	/**
+	 * 渲染图床筛选按钮（根据本地检测到的图床动态生成）
+	 */
+	/**
+	 * 渲染图标筛选按钮：本地图标 + 检测到的图床图标
+	 * 点击选中筛选，再次点击取消（显示全部）
+	 */
+	private renderFilterIcons() {
+		if (!this.bedFilterGroupEl) return;
+		this.bedFilterGroupEl.empty();
+
+		const filters = this.getEnabledFilters();
+		for (const cfg of filters) {
+			const btn = this.bedFilterGroupEl.createEl("button", {
+				cls: `imagelmgr-bed-filter-btn ${this.activeFilter === cfg.key ? "active" : ""}`,
+				attr: { "data-filter": cfg.key },
+			});
+
+			const iconSpan = btn.createEl("span", { cls: "imagelmgr-bed-icon" });
+			iconSpan.innerHTML = getFilterButtonIcon(cfg);
+			btn.createSpan({ text: cfg.label });
+
+			btn.addEventListener("click", () => {
+				if (this.activeFilter === cfg.key) {
+					this.activeFilter = null;
+				} else {
+					this.activeFilter = cfg.key;
+				}
+				this.renderFilterIcons();
+				this.renderContent();
+			});
+		}
+	}
+
 	// ==================== 过滤逻辑 ====================
+
+	/** 获取已注册的自定义域名列表（用于从其他图床中排除） */
+	private getCustomDomains(): string[] {
+		return this.getEnabledFilters()
+			.filter((cfg) => cfg.key !== "local" && !ImageLMgrView.BUILTIN_BEDS.has(cfg.key as ImageBedType))
+			.map((cfg) => cfg.key);
+	}
+
+	/** 检查 URL 是否属于已注册的自定义域名 */
+	private isCustomDomainMatch(url: string): boolean {
+		try {
+			const hostname = new URL(url).hostname;
+			return this.getCustomDomains().some((domain) => hostname.includes(domain));
+		} catch { return false; }
+	}
 
 	private applyLocalFilter(images: ImageLink[]): ImageLink[] {
 		let result = images;
@@ -421,15 +570,87 @@ export class ImageLMgrView extends ItemView {
 			);
 		}
 
-		if (this.filterMode === "local") {
+	// 统一筛选逻辑（基于 activeFilter）
+		if (this.activeFilter === "local") {
 			result = result.filter((img) => img.type === "local");
-		} else if (this.filterMode === "uploaded") {
-			result = result.filter((img) => this.compareResult.get(img.pure)?.exists);
-		} else if (this.filterMode === "unuploaded") {
-			result = result.filter((img) => !this.compareResult.get(img.pure)?.exists);
+		} else if (this.activeFilter === ImageBedType.Other) {
+			// 其他图床：显示非内置图床 且 非已注册自定义域名的图片
+			result = result.filter((img) => {
+				if (img.type === "local") return false;
+				const bedType = detectBedTypeFromUrl(img.pure);
+				if (bedType && ImageLMgrView.BUILTIN_BEDS.has(bedType) && bedType !== ImageBedType.Other) return false;
+				return !this.isCustomDomainMatch(img.pure);
+			});
+		} else if (this.activeFilter !== null && ImageLMgrView.BUILTIN_BEDS.has(this.activeFilter as ImageBedType)) {
+			// 内置图床类型
+			const targetBed = this.activeFilter as ImageBedType;
+			result = result.filter((img) => {
+				if (img.type === "local") return false;
+				const imgBedType = detectBedTypeFromUrl(img.pure);
+				return imgBedType === targetBed
+					|| (this.compareResult.get(img.pure)?.bedType === targetBed);
+			});
+		} else if (this.activeFilter !== null) {
+			// 自定义域名：检查 URL 是否包含该域名
+			const domainKey = this.activeFilter as string;
+			result = result.filter((img) => {
+				if (img.type === "local") return false;
+				try { return new URL(img.pure).hostname.includes(domainKey); } catch { return false; }
+			});
 		}
 
 		return result;
+	}
+
+	// ==================== 跳转功能 ====================
+
+	// ==================== 跳转 & 复制功能 ====================
+
+	/**
+	 * 双击路径 → 复制图片路径（或文件名，可设置）
+	 */
+	private copyImagePath(img: ImageLink) {
+		const displayPath = img.resolvedPath || img.pure;
+		const copyTarget = displayPath; // 后续可通过设置改为只取 fileName
+
+		navigator.clipboard.writeText(copyTarget).then(() => {
+			new Notice(`已复制: ${copyTarget}`);
+		}).catch(() => {
+			new Notice("复制失败");
+		});
+	}
+
+	/**
+	 * 打开指定笔记并跳转到此图片的引用位置
+	 */
+	private async jumpToFile(img: ImageLink, filePath: string) {
+		const abstractFile = this.plugin.app.vault.getAbstractFileByPath(filePath);
+		if (!abstractFile || !(abstractFile instanceof TFile)) return;
+
+		try {
+			const leaf = this.plugin.app.workspace.getLeaf(false);
+			await leaf.openFile(abstractFile, { active: true });
+
+			// 尝试在编辑器中定位到图片
+			const editorView = this.plugin.app.workspace.activeEditor;
+			if (editorView?.editor) {
+				const content = editorView.editor.getValue();
+				let searchStr: string;
+				if (img.type === "local") {
+					searchStr = img.raw || img.pure;
+				} else {
+					searchStr = img.pure;
+				}
+				const pos = content.indexOf(searchStr);
+				if (pos !== -1) {
+					const { line } = editorView.editor.offsetToPos(pos);
+					editorView.editor.setCursor({ line: line, ch: 0 });
+					editorView.editor.scrollIntoView({ from: { line: Math.max(0, line - 3), ch: 0 }, to: { line: line + 5, ch: 0 } }, true);
+				}
+			}
+		} catch (e) {
+			new Notice(`无法打开文件: ${filePath}`);
+		}
 	}
 
 	/**
@@ -437,18 +658,38 @@ export class ImageLMgrView extends ItemView {
 	 */
 	private getCloudOnlyFiles(): CloudFile[] {
 		return this.cloudFiles.filter(
-			(f) => !f.isDirectory && (this.fileNameRefCount.get(extractFileName(f.name)) || 0) === 0
+			(f) => !f.isDirectory && (this.fileNameRefCount.get(extractFileName(f.name) || f.name) || 0) === 0
 		);
 	}
 
 	private applyCloudFilter(files: CloudFile[]): CloudFile[] {
+		let result = files;
+
 		if (this.searchKeyword) {
-			return files.filter(
+			result = result.filter(
 				(f) => f.name.toLowerCase().includes(this.searchKeyword) ||
 					(f.prefix || "").toLowerCase().includes(this.searchKeyword)
 			);
 		}
-		return files;
+
+		// 图床筛选
+		if (this.activeFilter !== null && this.activeFilter !== "local") {
+			const filterKey = this.activeFilter;
+			result = result.filter((f) => {
+			if (filterKey === ImageBedType.Other) {
+				// 其他图床：排除内置图床 + 已注册自定义域名
+					const bedType = detectBedTypeFromUrl(f.url);
+					if (bedType && ImageLMgrView.BUILTIN_BEDS.has(bedType) && bedType !== ImageBedType.Other) return false;
+					return !this.isCustomDomainMatch(f.url);
+				} else if (ImageLMgrView.BUILTIN_BEDS.has(filterKey as ImageBedType)) {
+					return detectBedTypeFromUrl(f.url) === filterKey;
+				}
+				// 自定义域名匹配
+				try { return new URL(f.url).hostname.includes(filterKey as string); } catch { return false; }
+			});
+		}
+
+		return result;
 	}
 
 	// ==================== 创建目录 ====================
@@ -675,10 +916,11 @@ export class ImageLMgrView extends ItemView {
 		}
 	}
 
-	private async deleteCloudFile(filename: string) {
+	private async deleteCloudFile(filename: string, bedType?: ImageBedType) {
 		if (!confirm(`确定要删除云端文件 "${filename}" 吗？`)) return;
-
-		const result = await this.plugin.deleteCloudFile(filename, this.selectedBed);
+		// 优先使用传入的 bedType，否则从 selectedBed 获取
+		const targetBed = bedType || this.selectedBed;
+		const result = await this.plugin.deleteCloudFile(filename, targetBed);
 		if (result.success) {
 			new Notice("删除成功");
 			await this.refresh();
@@ -687,13 +929,6 @@ export class ImageLMgrView extends ItemView {
 		}
 	}
 
-	private openFileAtLine(filePath: string, line?: number) {
-		const file = this.app.vault.getAbstractFileByPath(filePath);
-		if (!file) { new Notice(`未找到文件: ${filePath}`); return; }
-		this.app.workspace.getLeaf(false).openFile(file as any, {
-			eState: line ? { line: line - 1 } : undefined,
-		});
-	}
 
 	private buildFileNameRefCount(): Map<string, number> {
 		const map = new Map<string, number>();

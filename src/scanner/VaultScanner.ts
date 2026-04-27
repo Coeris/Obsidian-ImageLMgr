@@ -35,6 +35,10 @@ export class VaultScanner {
 					const dest = this.app.metadataCache.getFirstLinkpathDest(link.pure, file.path);
 					if (dest) {
 						resolvedPath = dest.path;
+					} else {
+						// metadataCache 未命中时，基于引用文件目录手动拼接相对路径
+						const srcDir = file.path.substring(0, file.path.lastIndexOf("/"));
+						resolvedPath = srcDir ? `${srcDir}/${link.pure}` : link.pure;
 					}
 				}
 
