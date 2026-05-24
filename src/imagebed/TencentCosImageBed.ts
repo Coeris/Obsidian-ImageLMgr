@@ -12,10 +12,10 @@ export class TencentCosImageBed implements ImageBed {
 	private region = "";
 
 	configure(settings: ImageLMgrSettings) {
-		this.secretId = settings.tencentSecretId;
-		this.secretKey = settings.tencentSecretKey;
-		this.bucket = settings.tencentBucket;
-		this.region = settings.tencentRegion;
+		this.secretId = (settings.tencentSecretId || "").trim();
+		this.secretKey = (settings.tencentSecretKey || "").trim();
+		this.bucket = (settings.tencentBucket || "").trim();
+		this.region = (settings.tencentRegion || "").trim();
 	}
 
 	private getBaseUrl(): string {
@@ -143,7 +143,7 @@ export class TencentCosImageBed implements ImageBed {
 				});
 
 				if (!response.ok) {
-					console.error("COS ListObjects failed:", response.status, await response.text());
+					console.error("COS ListObjects failed:", response.status);
 					break;
 				}
 
@@ -160,7 +160,7 @@ export class TencentCosImageBed implements ImageBed {
 				}
 
 				// 解析文件（Contents）
-				const contents = xmlDoc.querySelectorAll("Contents");
+				const contents = Array.from(xmlDoc.querySelectorAll("Contents"));
 				for (const content of contents) {
 					const key = decodeURIComponent(
 						content.querySelector("Key")?.textContent || ""
@@ -180,7 +180,6 @@ export class TencentCosImageBed implements ImageBed {
 				marker = decodeURIComponent(xmlDoc.querySelector("IsTruncated")?.textContent === "true"
 					? (xmlDoc.querySelector("NextMarker")?.textContent || "")
 					: "");
-				// eslint-disable-next-line no-constant-condition
 			} while (marker);
 
 			// 从文件路径中提取目录结构
@@ -201,19 +200,20 @@ export class TencentCosImageBed implements ImageBed {
 				}
 			}
 		} catch (e) {
-			console.error("COS listFiles error:", e);
+			console.error("COS listFiles error:", e instanceof Error ? e.message : String(e));
 		}
 
 		return files;
 	}
 
-	async upload(file: File): Promise<UploadResult> {
+	async upload(file: File, imagePath?: string): Promise<UploadResult> {
 		if (!this.secretId || !this.secretKey || !this.bucket || !this.region) {
 			return { success: false, error: "腾讯云 COS 配置不完整" };
 		}
 
 		try {
-			const objectKey = `images/${file.name}`;
+			const prefix = imagePath ? imagePath.replace(/^\/+|\/+$/g, "") : "images";
+			const objectKey = `${prefix}/${file.name}`;
 			const { url, authHeader } = await this.signRequest("PUT", `/${objectKey}`, {
 				"Content-Type": file.type || "application/octet-stream",
 			});
@@ -315,5 +315,9 @@ export class TencentCosImageBed implements ImageBed {
 		} catch (e) {
 			return { success: false, error: `创建目录异常: ${e}` };
 		}
+	}
+
+	async testCreateDirectoryCapability(): Promise<{ supported: boolean; reason?: string }> {
+		return { supported: true };
 	}
 }

@@ -54,8 +54,8 @@ const BED_CONFIGS: BedConfig[] = [
 			"   方法填：GET, PUT, DELETE\n" +
 			"5. 若 Bucket 为私有读，图片链接需签名才能访问",
 		fields: [
+			{ name: "Bucket", desc: "存储桶名称（在 OSS 控制台「Bucket 列表」中查看，或打开 Bucket 概览页复制名称）", placeholder: "my-bucket", key: "aliyunBucket" },
 			{ name: "Endpoint", desc: "OSS 外网端点（Bucket 概览页可查）", placeholder: "https://oss-cn-hangzhou.aliyuncs.com", key: "aliyunEndpoint" },
-			{ name: "Bucket", desc: "存储桶名称", placeholder: "my-bucket", key: "aliyunBucket" },
 			{ name: "AccessKey ID", desc: "RAM 控制台获取", placeholder: "LTAI...", key: "aliyunAccessKeyId" },
 			{ name: "AccessKey Secret", desc: "密钥密码", placeholder: "", key: "aliyunAccessKeySecret", isSecret: true },
 		],
@@ -148,20 +148,6 @@ export class ImageLMgrSettingTab extends PluginSettingTab {
 		const content = collapsible.createDiv({ cls: "imagelmgr-collapsible-content" });
 		content.style.display = "";
 
-		new Setting(content)
-			.setName("默认图床")
-			.setDesc("打开面板时默认选中的图床类型")
-			.addDropdown((dd) => dd
-				.addOption(ImageBedType.GitHub, "GitHub")
-				.addOption(ImageBedType.Aliyun, "阿里云 OSS")
-				.addOption(ImageBedType.Tencent, "腾讯云 COS")
-				.addOption(ImageBedType.Other, "其他图床")
-				.setValue(this.plugin.settings.defaultBed)
-				.onChange((value) => {
-					this.plugin.settings.defaultBed = value as ImageBedType;
-					debouncedSaveSettings(this.plugin);
-				})
-			);
 
 		new Setting(content)
 			.setName("打开时自动刷新")
@@ -342,6 +328,10 @@ export class ImageLMgrSettingTab extends PluginSettingTab {
 			new Notice("请先启用 WebDAV 并填写服务器地址");
 			return;
 		}
+		if (!this.plugin.settings.webdavUrl.startsWith("https://")) {
+			new Notice("WebDAV 仅支持 HTTPS 连接");
+			return;
+		}
 
 		this.syncing = true;
 		this.setButtonLoading(btn, true);
@@ -397,6 +387,10 @@ export class ImageLMgrSettingTab extends PluginSettingTab {
 	private async syncFromRemote() {
 		if (!this.plugin.settings.webdavEnable || !this.plugin.settings.webdavUrl) {
 			new Notice("请先启用 WebDAV 并填写服务器地址");
+			return;
+		}
+		if (!this.plugin.settings.webdavUrl.startsWith("https://")) {
+			new Notice("WebDAV 仅支持 HTTPS 连接");
 			return;
 		}
 
@@ -716,6 +710,47 @@ export class ImageLMgrSettingTab extends PluginSettingTab {
 					}
 					return text;
 				});
+		}
+
+		// 测试连接按钮
+		if (bedType) {
+			const testRow = content.createDiv({ cls: "imagelmgr-test-connection-row" });
+			testRow.createSpan({ text: "连接状态：" });
+			const testStatus = testRow.createSpan({ cls: "imagelmgr-test-status", text: "未测试" });
+		const dirCapEl = testRow.createSpan({ cls: "imagelmgr-dir-capacity", text: "" });
+		const testBtn = testRow.createEl("button", {
+			text: "测试连接",
+			cls: "mod-cta",
+		});
+		testBtn.addEventListener("click", async () => {
+			testStatus.textContent = "检测中...";
+			dirCapEl.textContent = "";
+			testStatus.className = "imagelmgr-test-status imagelmgr-testing";
+			try {
+				const [connResult, capResult] = await Promise.all([
+					this.plugin.testBedConnection(bedType),
+					this.plugin.testCreateDirectoryCapability(bedType),
+				]);
+				if (connResult.success) {
+					testStatus.textContent = "已连接 ✓";
+					testStatus.className = "imagelmgr-test-status imagelmgr-ok";
+				} else {
+					testStatus.textContent = connResult.error || "连接失败 ✗";
+					testStatus.className = "imagelmgr-test-status imagelmgr-fail";
+				}
+
+				// 创建目录能力
+				dirCapEl.className = capResult.supported
+					? "imagelmgr-dir-capacity imagelmgr-dir-ok"
+					: "imagelmgr-dir-capacity imagelmgr-dir-no";
+				dirCapEl.textContent = capResult.supported
+					? "  |  支持新建目录"
+					: `  |  ${capResult.reason || "不支持新建目录"}`;
+			} catch (e) {
+				testStatus.textContent = "测试异常 ✗";
+				testStatus.className = "imagelmgr-test-status imagelmgr-fail";
+			}
+		});
 		}
 
 		content.createDiv({

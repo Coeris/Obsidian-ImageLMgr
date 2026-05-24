@@ -1,7 +1,7 @@
 {
   "id": "imagelmgr",
   "name": "ImageLMgr",
-  "version": "0.0.4",
+  "version": "0.0.7",
   "minAppVersion": "1.0.0",
   "description": "网图管理 - 全库图片链接扫描、本地图片管理、图床上传与比对",
   "author": "Coeic",

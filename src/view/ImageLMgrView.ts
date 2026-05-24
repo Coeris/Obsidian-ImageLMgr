@@ -37,19 +37,28 @@ export class ImageLMgrView extends ItemView {
 	/** 文件名 → 引用次数映射 */
 	private fileNameRefCount = new Map<string, number>();
 
-	/** #6 图床连接状态指示器元素 */
-	private bedStatusEl: HTMLSpanElement | null = null;
-
 	/** 动态图床筛选按钮容器 */
 	private bedFilterGroupEl: HTMLDivElement | null = null;
+
+	/** 操作区按钮引用（用于联动显隐） */
+	private uploadBtn: HTMLButtonElement | null = null;
+	private createDirBtn: HTMLButtonElement | null = null;
 
 	/** 标签滑动窗口焦点：key=图片pure路径, value=当前居中的文件索引 */
 	private tagFocusMap: Map<string, number> = new Map();
 
+	/** 云端文件多选状态：存储选中文件的 prefix 或 name */
+	private selectedCloudFiles = new Set<string>();
+
+	/** 删除选中按钮引用（用于更新计数） */
+	private deleteSelectedBtn: HTMLButtonElement | null = null;
+	/** 全选复选框引用 */
+	private selectAllCheckbox: HTMLInputElement | null = null;
+
 	constructor(leaf: WorkspaceLeaf, plugin: ImageLMgrPlugin) {
 		super(leaf);
 		this.plugin = plugin;
-		this.selectedBed = plugin.settings.defaultBed || ImageBedType.Aliyun;
+		this.selectedBed = ImageBedType.Aliyun;
 	}
 
 	getViewType(): string {
@@ -70,7 +79,9 @@ export class ImageLMgrView extends ItemView {
 		container.addClass("imagelmgr-container");
 
 		this.render(container);
-		await this.refresh();
+		if (this.plugin.settings.autoRefreshOnOpen) {
+			await this.refresh();
+		}
 	}
 
 	async onClose() {
@@ -91,22 +102,19 @@ export class ImageLMgrView extends ItemView {
 		this.localImages.sort((a, b) => (a.resolvedPath || a.pure).localeCompare(b.resolvedPath || b.pure));
 		this.fileNameRefCount = this.buildFileNameRefCount();
 
-
-
-		// #6 刷新时自动检测连接状态
-		this.testCurrentBed();
-
 		// 跨所有已配置图床进行比对，合并结果
 		const allCompareResult = new Map<string, { exists: boolean; url?: string; bedType?: ImageBedType }>();
 		const allCloudFiles: CloudFile[] = [];
 
 		for (const bedType of Object.values(ImageBedType)) {
 			try {
-				const [cloudFiles, compareResult] = await Promise.all([
-					this.plugin.listCloudFiles(bedType),
-					this.plugin.compareLocalWithCloud(this.localImages, bedType),
-				]);
+				// 先获取云端文件列表（阿里云/腾讯云的比对依赖此数据）
+				const cloudFiles = await this.plugin.listCloudFiles(bedType);
+				for (const cf of cloudFiles) cf.bedType = bedType;
 				allCloudFiles.push(...cloudFiles);
+
+				// 用云端文件列表做比对（避免 CORS HEAD 请求）
+				const compareResult = await this.plugin.compareLocalWithCloud(this.localImages, bedType, cloudFiles);
 				// 合并比对结果：记录每条本地图片在哪个图床存在及对应URL
 				for (const [key, val] of compareResult.entries()) {
 					if (val.exists && !allCompareResult.has(key)) {
@@ -134,70 +142,11 @@ export class ImageLMgrView extends ItemView {
 	/** 内置图床类型集合（用于区分自定义域名） */
 	private static readonly BUILTIN_BEDS = BUILTIN_BED_TYPES;
 
-	// ==================== #6 图床连接健康检测 ====================
-
-	private async testCurrentBed() {
-		if (!this.bedStatusEl) return;
-
-		this.bedStatusEl.className = "imagelmgr-bed-status imagelmgr-status-testing";
-		this.bedStatusEl.textContent = "● 检测中...";
-
-		const result = await this.plugin.testBedConnection(this.selectedBed);
-
-		if (result.success) {
-			this.bedStatusEl.className = "imagelmgr-bed-status imagelmgr-status-ok";
-			this.bedStatusEl.textContent = "● 已连接";
-		} else {
-			this.bedStatusEl.className = "imagelmgr-bed-status imagelmgr-status-no";
-			this.bedStatusEl.textContent = `● ${result.error || "连接失败"}`;
-		}
-	}
 
 	private render(container: HTMLElement) {
-		// 工具栏
-		const toolbar = container.createDiv({ cls: "imagelmgr-toolbar" });
-
-		// #6 连接状态指示器
-		this.bedStatusEl = toolbar.createSpan({ cls: "imagelmgr-bed-status imagelmgr-status-unknown", text: "● 未检测" });
-		this.bedStatusEl.title = "点击检测图床连接";
-		this.bedStatusEl.style.cursor = "pointer";
-		this.bedStatusEl.addEventListener("click", () => this.testCurrentBed());
-
-		const refreshBtn = toolbar.createEl("button", { text: "🔄 刷新", cls: "imagelmgr-refresh-btn" });
-		refreshBtn.addEventListener("click", async () => {
-			refreshBtn.textContent = "⏳ 刷新中...";
-			refreshBtn.disabled = true;
-			refreshBtn.classList.add("loading");
-			this.tagFocusMap.clear();
-
-			// 淡出
-			const container = this.containerEl.querySelector(".imagelmgr-container") as HTMLElement | null;
-			container?.classList.add("refreshing");
-
-			try {
-				await new Promise(r => setTimeout(r, 200)); // 等待淡出完成
-				await this.refresh();
-			} catch (e) {
-				new Notice(`刷新失败: ${e instanceof Error ? e.message : String(e)}`);
-			} finally {
-				container?.classList.remove("refreshing");
-				container?.classList.add("refreshed");
-				setTimeout(() => container?.classList.remove("refreshed"), 300);
-
-				refreshBtn.textContent = "🔄 刷新";
-				refreshBtn.disabled = false;
-				refreshBtn.classList.remove("loading");
-			}
-		});
-
-		const uploadBtn = toolbar.createEl("button", { text: "批量上传" });
-		uploadBtn.addEventListener("click", () => this.batchUpload());
-
-		const createDirBtn = toolbar.createEl("button", { text: "新建目录" });
-		createDirBtn.addEventListener("click", () => this.showCreateDirectoryDialog());
-
-		// 搜索 + 过滤栏
+		// ===== 过滤栏（最上面） =====
 		const filterBar = container.createDiv({ cls: "imagelmgr-filter-bar" });
+
 		const searchInput = filterBar.createEl("input", {
 			type: "text",
 			cls: "imagelmgr-search-input",
@@ -208,9 +157,48 @@ export class ImageLMgrView extends ItemView {
 			this.renderContent();
 		});
 
-		// 图标筛选按钮组（本地图标 + 动态检测到的图床）
+		// 图标筛选按钮组
 		this.bedFilterGroupEl = filterBar.createDiv({ cls: "imagelmgr-filter-group imagelmgr-bed-filter-group" });
 		this.renderFilterIcons();
+
+		// 右侧操作区（靠右）
+		const actionsRight = filterBar.createDiv({ cls: "imagelmgr-filter-actions" });
+
+		this.createDirBtn = actionsRight.createEl("button");
+		this.createDirBtn.textContent = "新建目录";
+		this.createDirBtn.addEventListener("click", () => this.showCreateDirectoryDialog());
+
+		this.uploadBtn = actionsRight.createEl("button", { text: "批量上传" });
+		this.uploadBtn.addEventListener("click", () => this.batchUpload());
+
+		const refreshBtn = actionsRight.createEl("button", { text: "🔄 刷新", cls: "imagelmgr-refresh-btn" });
+		refreshBtn.addEventListener("click", async () => {
+			refreshBtn.textContent = "⏳ 刷新中...";
+			refreshBtn.disabled = true;
+			refreshBtn.classList.add("loading");
+			this.tagFocusMap.clear();
+
+			const container2 = this.containerEl.querySelector(".imagelmgr-container") as HTMLElement | null;
+			container2?.classList.add("refreshing");
+
+			try {
+				await new Promise(r => setTimeout(r, 200));
+				await this.refresh();
+			} catch (e) {
+				new Notice(`刷新失败: ${e instanceof Error ? e.message : String(e)}`);
+			} finally {
+				container2?.classList.remove("refreshing");
+				container2?.classList.add("refreshed");
+				setTimeout(() => container2?.classList.remove("refreshed"), 300);
+
+				refreshBtn.textContent = "🔄 刷新";
+				refreshBtn.disabled = false;
+				refreshBtn.classList.remove("loading");
+			}
+		});
+
+		// 初始联动状态
+		this.syncActionButtons();
 
 		// 统一列表
 		const list = container.createDiv({ cls: "imagelmgr-list", attr: { id: "imagelmgr-main-list" } });
@@ -220,7 +208,11 @@ export class ImageLMgrView extends ItemView {
 	private renderContent() {
 		const el = document.getElementById("imagelmgr-main-list");
 		if (!el) return;
+
+		// 保留新建目录输入栏（不被清空）
+		const createdirBar = el.querySelector(".imagelmgr-createdir-bar");
 		el.empty();
+		if (createdirBar) el.prepend(createdirBar);
 
 		// 过滤本地图片
 		const filteredLocal = this.applyLocalFilter(this.localImages);
@@ -232,20 +224,6 @@ export class ImageLMgrView extends ItemView {
 
 		// ===== 第一部分：本地图片（含云端状态） =====
 		if (filteredLocal.length > 0) {
-			const uploadedCount = filteredLocal.filter(
-				(img) => this.compareResult.get(img.pure)?.exists
-			).length;
-
-			// 分区标题
-			const localHeader = el.createDiv({ cls: "imagelmgr-part-header" });
-			const localIcon = localHeader.createSpan({ cls: "imagelmgr-part-icon" });
-			localIcon.innerHTML = LOCAL_ICON_SVG;
-			localHeader.createSpan({ text: "本地图片", cls: "imagelmgr-part-title" });
-			localHeader.createSpan({
-				text: `${uploadedCount} 已上传 / ${filteredLocal.length - uploadedCount} 未上传`,
-				cls: "imagelmgr-part-count",
-			});
-
 			for (const img of filteredLocal) {
 				this.renderLocalItem(el, img);
 			}
@@ -255,7 +233,7 @@ export class ImageLMgrView extends ItemView {
 		const cloudOnly = this.getCloudOnlyFiles();
 		const filteredCloud = this.applyCloudFilter(cloudOnly);
 
-		if (filteredCloud.length > 0) {
+		if (this.plugin.settings.showUnreferenced && filteredCloud.length > 0) {
 			// 分隔线
 			el.createDiv({ cls: "imagelmgr-divider" });
 
@@ -268,28 +246,45 @@ export class ImageLMgrView extends ItemView {
 				cls: "imagelmgr-part-count",
 			});
 
-			// 一键清理按钮
+			// 多选操作栏
 			const cleanupBar = el.createDiv({ cls: "imagelmgr-cleanup-bar" });
-			cleanupBar.createSpan({ text: "这些文件没有被任何笔记引用", cls: "imagelmgr-cleanup-info" });
-			const cleanupBtn = cleanupBar.createEl("button", {
-				text: "一键清理",
-				cls: "imagelmgr-btn-sm imagelmgr-btn-danger",
-			});
-			cleanupBtn.addEventListener("click", () => {
-				this.cleanupUnreferenced(filteredCloud);
+
+			// 全选复选框
+			const selectAllLabel = cleanupBar.createEl("label", { cls: "imagelmgr-select-all-label" });
+			this.selectAllCheckbox = selectAllLabel.createEl("input", { type: "checkbox" }) as HTMLInputElement;
+			selectAllLabel.createSpan({ text: "全选" });
+
+			this.selectAllCheckbox.addEventListener("change", () => {
+				const checked = this.selectAllCheckbox!.checked;
+				if (checked) {
+					filteredCloud.forEach(f => this.selectedCloudFiles.add(f.prefix || f.name));
+				} else {
+					this.selectedCloudFiles.clear();
+				}
+				// 更新所有复选框状态
+				el.querySelectorAll<HTMLInputElement>(".imagelmgr-cloud-checkbox").forEach((cb: HTMLInputElement) => {
+					cb.checked = checked;
+				});
+				this.updateDeleteSelectedBtn();
 			});
 
-			// 判断是否有目录结构
-			const hasDirectories = filteredCloud.some((f) => f.isDirectory);
-			if (hasDirectories) {
-				this.renderCloudWithDirectories(el, filteredCloud);
-			} else {
-				for (const file of filteredCloud) {
-					if (!file.isDirectory) {
-						this.renderCloudItem(el, file);
-					}
+			cleanupBar.createSpan({ text: "这些文件没有被任何笔记引用", cls: "imagelmgr-cleanup-info" });
+
+			// 删除选中按钮
+			this.deleteSelectedBtn = cleanupBar.createEl("button", {
+				text: "删除选中",
+				cls: "imagelmgr-btn-sm imagelmgr-btn-danger",
+			});
+			this.deleteSelectedBtn.disabled = true;
+			this.deleteSelectedBtn.addEventListener("click", () => {
+				const selected = filteredCloud.filter(f => this.selectedCloudFiles.has(f.prefix || f.name));
+				if (selected.length > 0) {
+					this.cleanupUnreferenced(selected);
 				}
-			}
+			});
+
+			// 按文件夹分组渲染
+			this.renderCloudGroupedByFolder(el, filteredCloud);
 		}
 
 		// 两个列表都为空
@@ -355,7 +350,7 @@ export class ImageLMgrView extends ItemView {
 				leftTag.classList.add("clickable");
 				leftTag.addEventListener("click", () => {
 					this.tagFocusMap.set(img.pure, start - 1);
-					this.refresh();
+					this.renderContent();
 				});
 			}
 
@@ -371,7 +366,7 @@ export class ImageLMgrView extends ItemView {
 				tag.classList.add("clickable");
 				tag.addEventListener("click", () => {
 					this.tagFocusMap.set(img.pure, i);
-					this.refresh();
+					this.renderContent();
 				});
 				tag.addEventListener("dblclick", () => this.jumpToFile(img, f));
 			}
@@ -382,7 +377,7 @@ export class ImageLMgrView extends ItemView {
 				rightTag.classList.add("clickable");
 				rightTag.addEventListener("click", () => {
 					this.tagFocusMap.set(img.pure, end);
-					this.refresh();
+					this.renderContent();
 				});
 			}
 		}
@@ -405,8 +400,10 @@ export class ImageLMgrView extends ItemView {
 				});
 				link.addEventListener("click", (e) => {
 					e.preventDefault();
-					navigator.clipboard.writeText(result.url!);
-					new Notice("云端链接已复制");
+					navigator.clipboard.writeText(result.url!).then(
+						() => new Notice("云端链接已复制"),
+						() => new Notice("复制失败")
+					);
 				});
 			}
 		} else {
@@ -422,6 +419,23 @@ export class ImageLMgrView extends ItemView {
 
 	private renderCloudItem(container: HTMLElement, file: CloudFile, indent: string = "") {
 		const item = container.createDiv({ cls: "imagelmgr-item" });
+		const fileKey = file.prefix || file.name;
+
+		// 多选复选框
+		const checkbox = item.createEl("input", {
+			type: "checkbox",
+			cls: "imagelmgr-cloud-checkbox",
+		}) as HTMLInputElement;
+		checkbox.checked = this.selectedCloudFiles.has(fileKey);
+		checkbox.addEventListener("change", () => {
+			if (checkbox.checked) {
+				this.selectedCloudFiles.add(fileKey);
+			} else {
+				this.selectedCloudFiles.delete(fileKey);
+			}
+			this.updateSelectAllState();
+			this.updateDeleteSelectedBtn();
+		});
 
 		// 根据云端链接域名显示对应图床图标（内联 SVG）
 		const cloudBedType = detectBedTypeFromUrl(file.url);
@@ -444,13 +458,15 @@ export class ImageLMgrView extends ItemView {
 		}
 
 		item.createSpan({ cls: "imagelmgr-path", text: `${indent}${file.prefix || file.name}` });
-		item.createSpan({ cls: "imagelmgr-count imagelmgr-count-unref", text: "未引用" });
 
 		const actions = item.createDiv({ cls: "imagelmgr-actions" });
 
 		const copyBtn = actions.createEl("button", { text: "复制", cls: "imagelmgr-btn-sm" });
 		copyBtn.addEventListener("click", () => {
-			navigator.clipboard.writeText(file.url).then(() => new Notice("链接已复制"));
+			navigator.clipboard.writeText(file.url).then(
+				() => new Notice("链接已复制"),
+				() => new Notice("复制失败")
+			);
 		});
 
 		const insertBtn = actions.createEl("button", { text: "插入", cls: "imagelmgr-btn-sm" });
@@ -489,6 +505,32 @@ export class ImageLMgrView extends ItemView {
 
 			const dirHeader = el.createDiv({ cls: "imagelmgr-dir-header" });
 			const arrow = dirHeader.createSpan({ cls: "imagelmgr-dir-arrow", text: "▼" });
+
+			// 目录全选复选框
+			const dirCheckbox = dirHeader.createEl("input", {
+				type: "checkbox",
+				cls: "imagelmgr-cloud-checkbox",
+			}) as HTMLInputElement;
+			const allSelected = dirFiles.every(f => this.selectedCloudFiles.has(f.prefix || f.name));
+			dirCheckbox.checked = allSelected && dirFiles.length > 0;
+			dirCheckbox.addEventListener("click", (e) => e.stopPropagation());
+			dirCheckbox.addEventListener("change", () => {
+				for (const f of dirFiles) {
+					const key = f.prefix || f.name;
+					if (dirCheckbox.checked) {
+						this.selectedCloudFiles.add(key);
+					} else {
+						this.selectedCloudFiles.delete(key);
+					}
+				}
+				// 更新目录内所有文件的复选框
+				dirContent.querySelectorAll<HTMLInputElement>(".imagelmgr-cloud-checkbox").forEach(cb => {
+					cb.checked = dirCheckbox.checked;
+				});
+				this.updateSelectAllState();
+				this.updateDeleteSelectedBtn();
+			});
+
 			dirHeader.createSpan({ cls: "imagelmgr-dir-icon", text: "📁" });
 			dirHeader.createSpan({ cls: "imagelmgr-dir-name", text: dir.name });
 			dirHeader.createSpan({ cls: "imagelmgr-dir-count", text: `(${dirFiles.length})` });
@@ -504,6 +546,112 @@ export class ImageLMgrView extends ItemView {
 			for (const file of dirFiles) {
 				this.renderCloudItem(dirContent, file, "  ");
 			}
+		}
+	}
+
+	/** 按文件夹路径分组渲染云端文件（嵌套树） */
+	private renderCloudGroupedByFolder(el: HTMLElement, files: CloudFile[]) {
+		interface TreeNode {
+			files: CloudFile[];
+			children: Map<string, TreeNode>;
+		}
+
+		// 构建树
+		const root: TreeNode = { files: [], children: new Map() };
+
+		for (const file of files) {
+			const prefix = file.prefix || file.name;
+			const parts = prefix.split("/");
+			let node = root;
+
+			// 最后一段是文件名，中间的都是目录
+			for (let i = 0; i < parts.length - 1; i++) {
+				const part = parts[i];
+				if (!node.children.has(part)) {
+					node.children.set(part, { files: [], children: new Map() });
+				}
+				node = node.children.get(part)!;
+			}
+			node.files.push(file);
+		}
+
+		// 递归渲染
+		this.renderTreeNode(el, root, 0);
+	}
+
+	/** 收集节点及其所有子节点的文件 */
+	private collectAllFiles(node: { files: CloudFile[]; children: Map<string, { files: CloudFile[]; children: Map<string, any> }> }): CloudFile[] {
+		const result = [...node.files];
+		for (const child of node.children.values()) {
+			result.push(...this.collectAllFiles(child));
+		}
+		return result;
+	}
+
+	/** 递归渲染树节点 */
+	private renderTreeNode(
+		container: HTMLElement,
+		node: { files: CloudFile[]; children: Map<string, { files: CloudFile[]; children: Map<string, any> }> },
+		depth: number,
+	) {
+		// 渲染当前层级的文件
+		for (const file of node.files) {
+			this.renderCloudItem(container, file);
+		}
+
+		// 渲染子目录
+		const sortedChildren = Array.from(node.children.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+
+		for (const [dirName, childNode] of sortedChildren) {
+			const allFiles = this.collectAllFiles(childNode);
+
+			const dirHeader = container.createDiv({ cls: "imagelmgr-dir-header" });
+			dirHeader.style.paddingLeft = `${10 + depth * 16}px`;
+
+			const arrow = dirHeader.createSpan({ cls: "imagelmgr-dir-arrow", text: "▶" });
+
+			// 目录全选复选框
+			const dirCheckbox = dirHeader.createEl("input", {
+				type: "checkbox",
+				cls: "imagelmgr-cloud-checkbox",
+			}) as HTMLInputElement;
+			const allSelected = allFiles.every(f => this.selectedCloudFiles.has(f.prefix || f.name));
+			dirCheckbox.checked = allSelected && allFiles.length > 0;
+			dirCheckbox.addEventListener("click", (e) => e.stopPropagation());
+			dirCheckbox.addEventListener("change", () => {
+				for (const f of allFiles) {
+					const key = f.prefix || f.name;
+					if (dirCheckbox.checked) {
+						this.selectedCloudFiles.add(key);
+					} else {
+						this.selectedCloudFiles.delete(key);
+					}
+				}
+				dirContent.querySelectorAll<HTMLInputElement>(".imagelmgr-cloud-checkbox").forEach((cb: HTMLInputElement) => {
+					cb.checked = dirCheckbox.checked;
+				});
+				this.updateSelectAllState();
+				this.updateDeleteSelectedBtn();
+			});
+
+			// 文件夹图标 SVG
+			const iconSpan = dirHeader.createSpan({ cls: "imagelmgr-dir-icon" });
+			iconSpan.innerHTML = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
+
+			dirHeader.createSpan({ cls: "imagelmgr-dir-name", text: dirName });
+			dirHeader.createSpan({ cls: "imagelmgr-dir-count", text: `(${allFiles.length})` });
+
+			const dirContent = container.createDiv({ cls: "imagelmgr-dir-content" });
+			dirContent.style.display = "none"; // 默认折叠
+
+			dirHeader.addEventListener("click", () => {
+				const isCollapsed = dirContent.style.display === "none";
+				dirContent.style.display = isCollapsed ? "" : "none";
+				arrow.textContent = isCollapsed ? "▼" : "▶";
+			});
+
+			// 递归渲染子节点
+			this.renderTreeNode(dirContent, childNode, depth + 1);
 		}
 	}
 
@@ -541,9 +689,38 @@ export class ImageLMgrView extends ItemView {
 				this.renderContent();
 			});
 		}
+		this.syncActionButtons();
 	}
 
 	// ==================== 过滤逻辑 ====================
+
+	/**
+	 * 根据当前筛选状态联动操作按钮显隐
+	 * - "本地"筛选：隐藏批量上传、新建目录
+	 * - 已知不支持创建目录的图床（GitHub、Other）：隐藏新建目录
+	 * - 自定义域名 / 其他新增图床：默认显示（动态检测是否已配置）
+	 * - 全部/阿里云/腾讯云：显示全部
+	 */
+	private syncActionButtons() {
+		if (this.uploadBtn) {
+			const canUpload = this.activeFilter !== "local";
+			this.uploadBtn.style.display = canUpload ? "" : "none";
+		}
+		if (this.createDirBtn) {
+			this.createDirBtn.style.display = this.canCreateDirectory(this.activeFilter) ? "" : "none";
+		}
+	}
+
+	/**
+	 * 动态判断当前筛选是否支持创建目录
+	 * 白名单机制：已知不支持的只有 local / GitHub / Other，
+	 * 其余（阿里云、腾讯云、自定义域名、未来新增图床）默认显示
+	 */
+	private canCreateDirectory(filter: string | null): boolean {
+		if (!filter || filter === "local") return false;
+		if (filter === ImageBedType.GitHub || filter === ImageBedType.Other) return false;
+		return true;
+	}
 
 	/** 获取已注册的自定义域名列表（用于从其他图床中排除） */
 	private getCustomDomains(): string[] {
@@ -702,21 +879,72 @@ export class ImageLMgrView extends ItemView {
 		if (existing) { existing.remove(); return; }
 
 		const bar = el.createDiv({ cls: "imagelmgr-createdir-bar" });
-		bar.createSpan({ text: "目录名:" });
+		el.prepend(bar);
+		bar.createSpan({ text: "图床:" });
+
+		const bedSelect = bar.createEl("select", { cls: "imagelmgr-bed-select imagelmgr-createdir-bed" });
+		const supportedBeds: ImageBedType[] = [];
+		for (const type of Object.values(ImageBedType)) {
+			if (!this.canCreateDirectory(type)) continue;
+			supportedBeds.push(type);
+			bedSelect.createEl("option", { value: type, text: type });
+		}
+		if (supportedBeds.length === 0) {
+			bar.createSpan({ text: "当前无支持的图床（仅阿里云 OSS / 腾讯云 COS 支持创建目录）", cls: "imagelmgr-empty" });
+			return;
+		}
+
+		bedSelect.value = supportedBeds.includes(this.selectedBed)
+			? this.selectedBed
+			: supportedBeds[0];
+
+		// 选择图床时同步筛选列表
+		bedSelect.addEventListener("change", () => {
+			this.activeFilter = bedSelect.value as ImageBedType;
+			this.renderFilterIcons();
+			this.renderContent();
+		});
+
+		// 打开时自动选中当前下拉框对应的图床
+		this.activeFilter = bedSelect.value as ImageBedType;
+		this.renderFilterIcons();
+		this.renderContent();
+
+		bar.createSpan({ text: "  路径:" });
 		const input = bar.createEl("input", {
 			type: "text",
 			cls: "imagelmgr-createdir-input",
-			attr: { placeholder: "例如: my-folder" },
+			attr: { placeholder: '例如: blog/2026 或 images' },
 		});
 
-		const confirmBtn = bar.createEl("button", { text: "创建", cls: "imagelmgr-btn-sm" });
+		// 回车触发创建
+		input.addEventListener("keydown", (e) => {
+			if (e.key === "Enter") confirmBtn.click();
+		});
+
+		const confirmBtn = bar.createEl("button", { text: "创建", cls: "mod-cta imagelmgr-btn-sm" });
 		confirmBtn.addEventListener("click", async () => {
-			const dirName = input.value.trim();
-			if (!dirName) { new Notice("请输入目录名"); return; }
-			new Notice(`正在创建目录 ${dirName}...`);
-			const result = await this.plugin.createCloudDirectory(dirName, this.selectedBed);
+			const dirPath = input.value.trim().replace(/\/+$/, "");
+			if (!dirPath) { new Notice("请输入目录路径"); input.focus(); return; }
+
+			// 基础校验：不允许以 / 开头、不允许连续斜杠、非法字符
+			if (/^[/\\]/.test(dirPath)) {
+				new Notice("路径不能以 / 开头"); input.focus(); return;
+			}
+			if (/[<>:"|?*\x00-\x1f]/.test(dirPath)) {
+				new Notice("路径包含非法字符（< > : \" | ? * 等）"); input.focus(); return;
+			}
+			if (dirPath.includes("..")) {
+				new Notice("路径不能包含 .."); input.focus(); return;
+			}
+
+			const targetBed = bedSelect.value as ImageBedType;
+			if (!confirm(`确定要在 [${targetBed}] 创建目录 "${dirPath}" 吗？`)) return;
+
+			new Notice(`正在 ${targetBed} 创建目录 ${dirPath}...`);
+			const result = await this.plugin.createCloudDirectory(dirPath, targetBed);
 			if (result.success) {
-				new Notice("目录创建成功");
+				new Notice(`目录 ${dirPath} 创建成功`);
 				bar.remove();
 				await this.refresh();
 			} else {
@@ -733,17 +961,36 @@ export class ImageLMgrView extends ItemView {
 
 	private async cleanupUnreferenced(files: CloudFile[]) {
 		const count = files.length;
-		if (!confirm(`确定要删除 ${count} 个未引用的文件吗？此操作不可撤销。`)) return;
+		if (!confirm(`确定要删除选中的 ${count} 个文件吗？此操作不可撤销。`)) return;
 
 		let success = 0;
 		let failed = 0;
 		for (const file of files) {
-			const result = await this.plugin.deleteCloudFile(file.prefix || file.name, this.selectedBed);
+			const bedType = file.bedType || this.selectedBed;
+			const result = await this.plugin.deleteCloudFile(file.prefix || file.name, bedType);
 			if (result.success) success++; else failed++;
 		}
 
-		new Notice(`清理完成：删除 ${success} 个，失败 ${failed} 个`);
+		this.selectedCloudFiles.clear();
+		new Notice(`删除完成：成功 ${success} 个，失败 ${failed} 个`);
 		await this.refresh();
+	}
+
+	/** 更新全选复选框状态（根据子项选中情况） */
+	private updateSelectAllState() {
+		if (!this.selectAllCheckbox) return;
+		const cloudCheckboxes = this.containerEl.querySelectorAll<HTMLInputElement>(".imagelmgr-item .imagelmgr-cloud-checkbox");
+		if (cloudCheckboxes.length === 0) return;
+		const allChecked = Array.from(cloudCheckboxes).every(cb => cb.checked);
+		this.selectAllCheckbox.checked = allChecked;
+	}
+
+	/** 更新删除选中按钮的计数和禁用状态 */
+	private updateDeleteSelectedBtn() {
+		if (!this.deleteSelectedBtn) return;
+		const count = this.selectedCloudFiles.size;
+		this.deleteSelectedBtn.textContent = count > 0 ? `删除选中 (${count})` : "删除选中";
+		this.deleteSelectedBtn.disabled = count === 0;
 	}
 
 	// ==================== 上传相关 ====================
@@ -773,7 +1020,7 @@ export class ImageLMgrView extends ItemView {
 		// #10 检查该文件的 auto-upload frontmatter
 		const fm = await this.plugin.getFileFrontmatter();
 		if (fm.autoUpload === false) {
-			new Notice("该笔记的 Frontmeter 已禁用自动上传 (auto-upload: false)");
+			new Notice("该笔记的 Frontmatter 已禁用自动上传 (auto-upload: false)");
 			return;
 		}
 
@@ -782,28 +1029,29 @@ export class ImageLMgrView extends ItemView {
 		if (!fileName) { new Notice("无法解析文件名"); return; }
 
 		// 优先用解析后的库内绝对路径查找文件
-		let targetFile = this.app.vault.getAbstractFileByPath(resolvedPath) as any;
-		if (!targetFile || !("read" in targetFile)) {
-			targetFile = this.app.vault.getFiles().find((f) => f.name === fileName);
+		let targetFile: TFile | null = this.app.vault.getAbstractFileByPath(resolvedPath) as TFile | null;
+		if (!targetFile || !("extension" in targetFile)) {
+			targetFile = this.app.vault.getFiles().find((f) => f.name === fileName) ?? null;
 		}
 
-		if (!targetFile || !("read" in targetFile)) {
+		if (!targetFile || !("extension" in targetFile)) {
 			new Notice(`未找到文件: ${fileName}`);
 			return;
 		}
 
 		try {
-			const content = await this.app.vault.readBinary(targetFile as any);
+			const content = await this.app.vault.readBinary(targetFile);
 			const blob = new Blob([content]);
 			const file = new File([blob], fileName);
 
-			// #10 使用生效图床类型
+			// #10 使用生效图床类型和路径
 			const effectiveBed = await this.getEffectiveBedType();
+			const effectivePath = typeof fm.imagePath === "string" ? fm.imagePath : undefined;
 
 			new Notice(`正在上传 ${fileName}...`);
 
 			// #5 使用带去重的上传
-			const result = await this.plugin.uploadImageWithDedup(file, effectiveBed);
+			const result = await this.plugin.uploadImageWithDedup(file, effectiveBed, effectivePath);
 
 			if (!result.success) {
 				new Notice(`上传失败: ${result.error}`);
@@ -845,7 +1093,8 @@ export class ImageLMgrView extends ItemView {
 		for (let i = 0; i < toUpload.length; i++) {
 			const img = toUpload[i];
 
-			// #10 检查每张图的来源文件是否有 auto-upload 限制
+			// #10 检查每张图的来源文件是否有 auto-upload 限制，并获取 imagePath
+			let effectivePath: string | undefined;
 			const sourceFile = img.files[0];
 			if (sourceFile) {
 				try {
@@ -856,6 +1105,7 @@ export class ImageLMgrView extends ItemView {
 						if (fm?.autoUpload === false) {
 							continue; // 跳过禁用的文件
 						}
+						if (fm?.imagePath) effectivePath = fm.imagePath;
 					}
 				} catch { /* 解析失败不阻止 */ }
 			}
@@ -866,26 +1116,26 @@ export class ImageLMgrView extends ItemView {
 				const fileName = extractFileName(resolvedPath);
 				if (!fileName) continue;
 
-				let targetFile = this.app.vault.getAbstractFileByPath(resolvedPath) as any;
-				if (!targetFile || !("read" in targetFile)) {
-					targetFile = this.app.vault.getFiles().find((f) => f.name === fileName);
+				let targetFile: TFile | null = this.app.vault.getAbstractFileByPath(resolvedPath) as TFile | null;
+				if (!targetFile || !("extension" in targetFile)) {
+					targetFile = this.app.vault.getFiles().find((f) => f.name === fileName) ?? null;
 				}
-				if (!targetFile || !("read" in targetFile)) continue;
+				if (!targetFile || !("extension" in targetFile)) continue;
 
-				const content = await this.app.vault.readBinary(targetFile as any);
+				const content = await this.app.vault.readBinary(targetFile);
 				const blob = new Blob([content]);
 				const file = new File([blob], fileName);
 
 				// #5 使用带去重的上传
-				const result = await this.plugin.uploadImageWithDedup(file, effectiveBed);
+				const result = await this.plugin.uploadImageWithDedup(file, effectiveBed, effectivePath);
 
 				if (result.success && result.url) {
 					if (result.cached) {
 						dedupCount++;
 					} else {
 						successCount++;
-						await this.plugin.replaceLink(img, result.url);
 					}
+					await this.plugin.replaceLink(img, result.url);
 				} else {
 					failCount++;
 				}
@@ -910,7 +1160,8 @@ export class ImageLMgrView extends ItemView {
 		const editor = this.app.workspace.activeEditor?.editor;
 		if (editor) {
 			const cursor = editor.getCursor();
-			editor.replaceRange(`![](${url})`, cursor);
+			const alt = url.split("/").pop()?.split("?")[0] || "";
+			editor.replaceRange(`![${alt}](${url})`, cursor);
 		} else {
 			new Notice("请先打开一个编辑器");
 		}

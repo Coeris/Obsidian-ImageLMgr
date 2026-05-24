@@ -57,12 +57,12 @@ export class GitHubImageBed implements ImageBed {
 		return files;
 	}
 
-	async upload(file: File): Promise<UploadResult> {
+	async upload(file: File, imagePath?: string): Promise<UploadResult> {
 		if (!this.token || !this.owner || !this.repo) {
 			return { success: false, error: "GitHub 图床配置不完整" };
 		}
 
-		const basePath = this.path ? `${this.path}/` : "";
+		const basePath = imagePath ? `${imagePath.replace(/^\/+|\/+$/g, "")}/` : (this.path ? `${this.path}/` : "");
 		const path = `${basePath}${file.name}`;
 		const url = `https://api.github.com/repos/${this.owner}/${this.repo}/contents/${path}`;
 
@@ -183,6 +183,10 @@ export class GitHubImageBed implements ImageBed {
 
 	async createDirectory(_dirName: string): Promise<{ success: boolean; error?: string }> {
 		return { success: false, error: "GitHub 图床不支持创建目录" };
+	}
+
+	testCreateDirectoryCapability(): Promise<{ supported: boolean; reason?: string }> {
+		return Promise.resolve({ supported: false, reason: "GitHub 图床不支持创建目录" });
 	}
 }
 

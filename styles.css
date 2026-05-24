@@ -6,22 +6,16 @@
 	color: var(--text-normal);
 }
 
-.imagelmgr-header {
-	font-size: 16px;
-	font-weight: 700;
-	padding-bottom: 10px;
-	border-bottom: 1px solid var(--background-modifier-border);
-	margin-bottom: 10px;
-}
-
-/* 工具栏 */
-.imagelmgr-toolbar {
+/* 过滤栏右侧操作区 */
+.imagelmgr-filter-actions {
 	display: flex;
+	align-items: center;
 	gap: 6px;
-	margin-bottom: 8px;
+	margin-left: auto;
+	flex-shrink: 0;
 }
 
-.imagelmgr-toolbar button {
+.imagelmgr-filter-actions button {
 	padding: 4px 12px;
 	border-radius: 4px;
 	border: none;
@@ -32,9 +26,16 @@
 	transition: color 0.15s, background 0.15s;
 }
 
-.imagelmgr-toolbar button:hover {
+.imagelmgr-filter-actions button:hover {
 	background: var(--background-modifier-hover);
 	color: var(--text-normal);
+}
+
+/* 刷新按钮 */
+.imagelmgr-refresh-btn {
+	padding: 4px 10px;
+	flex-shrink: 0;
+	font-size: 12px;
 }
 
 /* 刷新按钮加载状态 */
@@ -97,41 +98,6 @@
 	flex-shrink: 0;
 }
 
-/* 过滤按钮组 */
-.imagelmgr-filter-group {
-	display: flex;
-	gap: 2px;
-	flex-shrink: 0;
-}
-
-.imagelmgr-filter-btn {
-	padding: 3px 10px;
-	font-size: 11px;
-	border-radius: 4px;
-	border: 1px solid var(--background-modifier-border);
-	background: var(--background-primary);
-	color: var(--text-muted);
-	cursor: pointer;
-	transition: all 0.15s;
-}
-
-.imagelmgr-filter-btn:hover {
-	background: var(--background-modifier-hover);
-}
-
-.imagelmgr-filter-btn.active {
-	background: var(--interactive-accent);
-	color: var(--text-on-accent);
-	border-color: var(--interactive-accent);
-}
-
-.imagelmgr-filter-icon {
-	display: inline-flex;
-	align-items: center;
-	margin-right: 2px;
-	flex-shrink: 0;
-}
-
 /* 统一列表 */
 .imagelmgr-list {
 	border: 1px solid var(--background-modifier-border);
@@ -189,38 +155,6 @@
 	background: var(--background-modifier-hover);
 }
 
-/* 类型标签 */
-.imagelmgr-badge {
-	font-size: 10px;
-	font-weight: 600;
-	padding: 1px 6px;
-	border-radius: 3px;
-	text-transform: uppercase;
-	flex-shrink: 0;
-	display: inline-flex;
-	align-items: center;
-	gap: 3px;
-}
-
-.imagelmgr-badge-text {
-	line-height: normal;
-}
-
-.imagelmgr-badge-local {
-	background: #2d6a4f;
-	color: #d8f3dc;
-}
-
-.imagelmgr-badge-https {
-	background: #1b4965;
-	color: #bee9e8;
-}
-
-.imagelmgr-badge-http {
-	background: #7b2d26;
-	color: #f2cc8f;
-}
-
 /* 路径 */
 .imagelmgr-path {
 	flex: 1;
@@ -245,17 +179,6 @@
 	color: var(--text-faint);
 	font-size: 11px;
 	flex-shrink: 0;
-}
-
-/* 引用次数 */
-.imagelmgr-count-referenced {
-	color: #52b788;
-	font-weight: 500;
-}
-
-.imagelmgr-count-unref {
-	color: var(--text-faint);
-	font-style: italic;
 }
 
 /* 来源文件标签（逐个显示） */
@@ -290,18 +213,13 @@
 	color: var(--text-normal);
 }
 
-
-
-/* 来源文件 */
-.imagelmgr-files {
-	color: var(--text-muted);
-	font-size: 11px;
-	flex-shrink: 0;
-	max-width: 300px;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+.imagelmgr-file-tag-focus {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-color: var(--interactive-accent);
 }
+
+
 
 /* 云端状态 */
 .imagelmgr-status {
@@ -380,7 +298,7 @@
 .imagelmgr-cleanup-bar {
 	display: flex;
 	align-items: center;
-	justify-content: space-between;
+	gap: 10px;
 	padding: 6px 10px;
 	background: var(--background-modifier-hover);
 	border-bottom: 1px solid var(--background-modifier-border);
@@ -389,6 +307,25 @@
 .imagelmgr-cleanup-info {
 	color: var(--text-muted);
 	font-size: 12px;
+	margin-left: auto;
+}
+
+/* 全选标签 */
+.imagelmgr-select-all-label {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	font-size: 12px;
+	color: var(--text-normal);
+	cursor: pointer;
+	flex-shrink: 0;
+}
+
+/* 云端文件复选框 */
+.imagelmgr-cloud-checkbox {
+	flex-shrink: 0;
+	margin: 0;
+	cursor: pointer;
 }
 
 /* 创建目录 */
@@ -422,7 +359,7 @@
 	display: flex;
 	align-items: center;
 	gap: 6px;
-	padding: 6px 10px;
+	padding: 5px 10px;
 	cursor: pointer;
 	user-select: none;
 }
@@ -440,8 +377,10 @@
 }
 
 .imagelmgr-dir-icon {
-	font-size: 14px;
+	display: inline-flex;
+	align-items: center;
 	flex-shrink: 0;
+	color: var(--text-muted);
 }
 
 .imagelmgr-dir-name {
@@ -518,26 +457,7 @@
 	border-color: var(--interactive-accent);
 }
 
-.imagelmgr-no-beds {
-	font-size: 11px;
-	color: var(--text-faint);
-	line-height: 26px;
-}
-
-/* 设置面板 - 图床配置说明（旧版，已替换为折叠式） */
-.imagelmgr-setting-desc {
-	padding: 8px 12px;
-	margin: 4px 0 12px 0;
-	background: var(--background-secondary);
-	border-left: 3px solid var(--text-accent);
-	border-radius: 4px;
-	font-size: 11.5px;
-	line-height: 1.7;
-	color: var(--text-muted);
-	white-space: pre-line;
-}
-
-/* 设置面板 - 折叠式图床配置 */
+/* 设置面板 - 配置步骤教程 */
 .imagelmgr-collapsible {
 	margin-bottom: 8px;
 	border: 1px solid var(--background-modifier-border);
@@ -549,7 +469,6 @@
 .imagelmgr-collapsible-header {
 	padding: 10px 12px;
 	cursor: pointer;
-	user-select: none;
 	transition: background-color 0.15s;
 }
 
@@ -603,6 +522,13 @@
 	line-height: 1.75;
 	color: var(--text-muted);
 	white-space: pre-line;
+	user-select: text;
+}
+
+/* 设置面板：确保所有文字可选中复制（覆盖 Obsidian 默认 user-select: none） */
+.imagelmgr-collapsible,
+.imagelmgr-collapsible * {
+	user-select: text !important;
 }
 
 /* WebDAV 同步操作按钮 */
@@ -633,28 +559,6 @@
 	background: var(--interactive-accent);
 	color: var(--text-on-accent);
 	border-color: var(--interactive-accent);
-}
-
-/* 图床连接状态指示器 */
-.imagelmgr-bed-status {
-	font-size: 11px;
-	font-weight: 500;
-	white-space: nowrap;
-	flex-shrink: 0;
-	margin-right: auto;
-	padding: 2px 6px;
-	border-radius: 3px;
-	cursor: pointer;
-	transition: all 0.2s;
-}
-
-.imagelmgr-status-unknown {
-	color: var(--text-faint);
-}
-
-.imagelmgr-status-testing {
-	color: var(--text-muted);
-	animation: imagelmgr-pulse 1s infinite;
 }
 
 @keyframes imagelmgr-pulse {
@@ -821,4 +725,49 @@
 .imagelmgr-qf-body button:hover {
 	background: var(--interactive-error-hover);
 	color: var(--interactive-error);
+}
+
+/* 设置页 - 图床连接测试 */
+.imagelmgr-test-connection-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-top: 14px;
+	padding-top: 10px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.imagelmgr-test-status {
+	font-size: 12px;
+	font-weight: 500;
+	flex: 1;
+}
+
+.imagelmgr-test-status.imagelmgr-testing {
+	color: var(--text-muted);
+	animation: imagelmgr-pulse 1s infinite;
+}
+
+.imagelmgr-test-status.imagelmgr-ok {
+	color: #2ea043; /* GitHub green */
+}
+
+.imagelmgr-test-status.imagelmgr-fail {
+	color: #e63946;
+}
+
+/* 创建目录能力提示 */
+.imagelmgr-dir-capacity {
+	font-size: 11px;
+	font-weight: 400;
+	white-space: nowrap;
+	flex-shrink: 0;
+}
+
+.imagelmgr-dir-ok {
+	color: #2ea043;
+}
+
+.imagelmgr-dir-no {
+	color: var(--text-faint);
 }

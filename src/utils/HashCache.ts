@@ -70,18 +70,6 @@ export class HashCache {
 	}
 
 	/**
-	 * 按图床类型清除缓存条目（切换配置后使用）
-	 */
-	clearByBedType(bedType: string): void {
-		for (const [hash, entry] of this.cache) {
-			if (entry.bedType === bedType) {
-				this.cache.delete(hash);
-				this.dirty = true;
-			}
-		}
-	}
-
-	/**
 	 * 序列化用于持久化存储
 	 */
 	serialize(): string {

@@ -13,9 +13,14 @@ export const BUILTIN_BED_TYPES = new Set<ImageBedType>([
 	ImageBedType.Other,
 ]);
 
-/** 校验字符串是否为有效的内联 SVG */
+/** 校验字符串是否为有效的内联 SVG（仅允许安全的图形元素和属性） */
 export function isValidSvg(svg?: string): boolean {
-	return typeof svg === "string" && svg.trim().startsWith("<svg") && svg.includes("</svg>");
+	if (typeof svg !== "string") return false;
+	const trimmed = svg.trim();
+	if (!trimmed.startsWith("<svg") || !trimmed.includes("</svg>")) return false;
+	// 拒绝包含脚本、事件处理器、外部引用的 SVG
+	const dangerous = /<\s*script|on\w+\s*=|javascript\s*:|data\s*:|<\s*iframe|<\s*embed|<\s*object|<\s*link|<\s*style|<\s*foreignObject/i;
+	return !dangerous.test(trimmed);
 }
 
 /**

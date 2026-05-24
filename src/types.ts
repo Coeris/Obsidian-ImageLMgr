@@ -32,8 +32,6 @@ export interface QuickFilterConfig {
 
 export interface ImageLMgrSettings {
 	// ========== 插件通用设置 ==========
-	/** 默认图床类型 */
-	defaultBed: ImageBedType;
 	/** 视图打开时自动刷新 */
 	autoRefreshOnOpen: boolean;
 	/** 显示云端未引用文件 */
@@ -89,6 +87,8 @@ export interface CloudFile {
 	isDirectory?: boolean;
 	/** 完整 object key（含路径前缀） */
 	prefix?: string;
+	/** 来源图床类型 */
+	bedType?: ImageBedType;
 }
 
 export interface UploadResult {
@@ -100,4 +100,21 @@ export interface UploadResult {
 export interface CompareResult {
 	exists: boolean;
 	url?: string;
+}
+
+export interface ImageBed {
+	/** 配置图床 */
+	configure(settings: ImageLMgrSettings): void;
+	/** 获取文件列表 */
+	listFiles(): Promise<CloudFile[]>;
+	/** 上传文件 */
+	upload(file: File, imagePath?: string): Promise<UploadResult>;
+	/** 删除文件 */
+	delete(filename: string): Promise<{ success: boolean; error?: string }>;
+	/** 创建目录 */
+	createDirectory(dirName: string): Promise<{ success: boolean; error?: string }>;
+	/** 测试连接 */
+	testConnection?(): Promise<{ success: boolean; error?: string }>;
+	/** 测试是否支持创建目录 */
+	testCreateDirectoryCapability?(): Promise<{ supported: boolean; reason?: string }>;
 }

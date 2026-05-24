@@ -3,7 +3,7 @@
  * Obsidian 纯文本图片链接管理工具
  */
 
-import { Plugin, Notice } from "obsidian";
+import { Plugin, Notice, TFile } from "obsidian";
 import { ImageLMgrSettingTab } from "./settings/SettingTab";
 import { ImageLMgrView, VIEW_TYPE_IMAGE_LMGR } from "./view/ImageLMgrView";
 import { LinkParser } from "./parser/LinkParser";
@@ -14,12 +14,13 @@ import { GitHubImageBed } from "./imagebed/GitHubImageBed";
 import { AliyunOssImageBed } from "./imagebed/AliyunOssImageBed";
 import { TencentCosImageBed } from "./imagebed/TencentCosImageBed";
 import { SmmsImageBed } from "./imagebed/SmmsImageBed";
-import { ImageLink, ImageLMgrSettings, ImageBedType } from "./types";
+import { ImageLink, ImageLMgrSettings, ImageBedType, CloudFile } from "./types";
 import { HashCache } from "./utils/HashCache";
+import { parseFrontmatter } from "./utils/FrontmatterParser";
+import { encryptSensitiveFields, decryptSensitiveFields } from "./utils/SecureStorage";
 
 const DEFAULT_SETTINGS: ImageLMgrSettings = {
 	// 插件通用设置
-	defaultBed: ImageBedType.Aliyun,
 	autoRefreshOnOpen: true,
 	showUnreferenced: true,
 	debounceDelay: 500,
@@ -67,6 +68,8 @@ export default class ImageLMgrPlugin extends Plugin {
 	imageBedManager: ImageBedManager;
 	/** 图片去重哈希缓存 */
 	hashCache: HashCache = new HashCache();
+	/** WebDAV 同步元数据 */
+	private webdavMeta: { lastSyncedAt?: string; lastSyncSource?: string } | null = null;
 
 	async onload() {
 		await this.loadSettings();
@@ -111,7 +114,7 @@ export default class ImageLMgrPlugin extends Plugin {
 		// 监听文件变更事件
 		this.registerEvent(
 			this.app.vault.on("modify", (file) => {
-				if (file.extension === "md") {
+				if (file instanceof TFile && file.extension === "md") {
 					this.onFileChanged(file.path);
 				}
 			})
@@ -119,7 +122,7 @@ export default class ImageLMgrPlugin extends Plugin {
 
 		this.registerEvent(
 			this.app.vault.on("delete", (file) => {
-				if (file.extension === "md") {
+				if (file instanceof TFile && file.extension === "md") {
 					this.onFileChanged(file.path);
 				}
 			})
@@ -127,7 +130,7 @@ export default class ImageLMgrPlugin extends Plugin {
 
 		this.registerEvent(
 			this.app.vault.on("rename", (file) => {
-				if (file.extension === "md") {
+				if (file instanceof TFile && file.extension === "md") {
 					this.onFileChanged(file.path);
 				}
 			})
@@ -206,21 +209,36 @@ export default class ImageLMgrPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		const data = await this.loadData() || {};
+		const { _hashcache, _webdavmeta, ...settingsData } = data;
+		const raw = Object.assign({}, DEFAULT_SETTINGS, settingsData);
+		// 解密敏感字段（自动兼容旧的明文数据）
+		const salt = `imagelmgr:${this.app.vault.getName()}`;
+		this.settings = await decryptSensitiveFields(raw, salt) as ImageLMgrSettings;
 		// 恢复去重缓存
-		const savedCache = await this.loadData("_hashcache");
-		if (savedCache && typeof savedCache === "string") {
-			this.hashCache = new HashCache(savedCache);
+		if (_hashcache && typeof _hashcache === "string") {
+			this.hashCache = new HashCache(_hashcache);
+		}
+		// 恢复 WebDAV 同步元数据
+		if (_webdavmeta) {
+			this.webdavMeta = _webdavmeta;
 		}
 	}
 
 	async saveSettings() {
-		await this.saveData(this.settings);
-		// 持久化去重缓存
+		// 加密敏感字段后保存
+		const salt = `imagelmgr:${this.app.vault.getName()}`;
+		const encrypted = await encryptSensitiveFields(this.settings as any, salt);
+		// 将 hash cache 和 webdav meta 合并到主数据对象
+		const savePayload: any = { ...encrypted };
 		if (this.hashCache.isDirty()) {
-			await this.saveData(this.hashCache.serialize(), "_hashcache");
+			savePayload._hashcache = this.hashCache.serialize();
 			this.hashCache.markClean();
 		}
+		if (this.webdavMeta) {
+			savePayload._webdavmeta = this.webdavMeta;
+		}
+		await this.saveData(savePayload);
 		// 更新各图床配置
 		for (const bed of this.imageBedManager.getAll()) {
 			bed.configure(this.settings);
@@ -253,22 +271,24 @@ export default class ImageLMgrPlugin extends Plugin {
 
 	/**
 	 * 比对本地图片与云端
+	 * @param cloudFiles 可选的云端文件列表（用于文件名匹配，避免 CORS）
 	 */
 	async compareLocalWithCloud(
 		localImages: ImageLink[],
-		bedType?: ImageBedType
+		bedType?: ImageBedType,
+		cloudFiles?: CloudFile[]
 	): Promise<Map<string, { exists: boolean; url?: string }>> {
-		return await this.cloudComparator.compare(localImages, bedType);
+		return await this.cloudComparator.compare(localImages, bedType, cloudFiles);
 	}
 
 	/**
 	 * 上传图片到图床
 	 */
-	async uploadImage(file: File, bedType: ImageBedType): Promise<{ success: boolean; url?: string; error?: string }> {
+	async uploadImage(file: File, bedType: ImageBedType, imagePath?: string): Promise<{ success: boolean; url?: string; error?: string }> {
 		const bed = this.imageBedManager.get(bedType);
 		if (!bed) return { success: false, error: "图床未注册" };
 
-		return bed.upload(file);
+		return bed.upload(file, imagePath);
 	}
 
 	/**
@@ -279,23 +299,22 @@ export default class ImageLMgrPlugin extends Plugin {
 		if (!activeFile) return;
 
 		const content = await this.app.vault.read(activeFile);
-		const escapedPure = escapeRegex(img.pure);
-		const escapedRaw = escapeRegex(img.raw);
-
 		let newContent: string;
 
 		if (img.raw.startsWith("![[") && img.raw.endsWith("]]")) {
 			// Wiki 链接格式: ![[pure|params]] -> ![[newPure|params]]
-			const escapedFull = escapeRegex(img.raw);
 			const newWikiLink = img.params
 				? `![[${newPure}|${img.params}]]`
 				: `![[${newPure}]]`;
-			newContent = content.replace(escapedFull, newWikiLink);
+			newContent = content.split(img.raw).join(newWikiLink);
 		} else {
 			// Markdown 链接格式: ![alt](raw) -> ![alt](newPure)
+			const escapedRaw = escapeRegex(img.raw);
+			// 转义替换字符串中的 $ 防止被当作反向引用
+			const safeReplacement = `$1${newPure.replace(/\$/g, "$$$$")}$2`;
 			newContent = content.replace(
 				new RegExp(`(!\\[[^\\]]*\\]\\()${escapedRaw}(\\))`, "g"),
-				`$1${newPure}$2`
+				safeReplacement
 			);
 		}
 
@@ -317,7 +336,7 @@ export default class ImageLMgrPlugin extends Plugin {
 	/**
 	 * 获取云端文件列表
 	 */
-	async listCloudFiles(bedType: ImageBedType): Promise<{ name: string; url: string; isDirectory?: boolean; prefix?: string }[]> {
+	async listCloudFiles(bedType: ImageBedType): Promise<CloudFile[]> {
 		const bed = this.imageBedManager.get(bedType);
 		if (!bed) return [];
 
@@ -344,13 +363,21 @@ export default class ImageLMgrPlugin extends Plugin {
 		return { success: false, error: "该图床不支持连接测试" };
 	}
 
+	async testCreateDirectoryCapability(bedType: ImageBedType): Promise<{ supported: boolean; reason?: string }> {
+		const bed = this.imageBedManager.get(bedType);
+		if (!bed) return { supported: false, reason: "图床未注册" };
+		if (bed.testCreateDirectoryCapability) return bed.testCreateDirectoryCapability();
+		return { supported: false, reason: "未知是否支持创建目录" };
+	}
+
 	/**
 	 * #5 带去重的图片上传
 	 * 先计算文件哈希，命中缓存则直接返回已有 URL，避免重复上传
 	 */
 	async uploadImageWithDedup(
 		file: File,
-		bedType: ImageBedType
+		bedType: ImageBedType,
+		imagePath?: string
 	): Promise<{ success: boolean; url?: string; error?: string; cached?: boolean }> {
 		const hash = await HashCache.computeHash(file);
 		const cached = this.hashCache.get(hash);
@@ -361,7 +388,7 @@ export default class ImageLMgrPlugin extends Plugin {
 		}
 
 		// 执行上传
-		const result = await this.uploadImage(file, bedType);
+		const result = await this.uploadImage(file, bedType, imagePath);
 		if (result.success && result.url) {
 			this.hashCache.set(hash, {
 				hash,
@@ -372,7 +399,9 @@ export default class ImageLMgrPlugin extends Plugin {
 			});
 			// 立即持久化缓存变更
 			try {
-				await this.saveData(this.hashCache.serialize(), "_hashcache");
+				const data = (await this.loadData()) || {};
+				data._hashcache = this.hashCache.serialize();
+				await this.saveData(data);
 				this.hashCache.markClean();
 			} catch { /* 静默失败，下次保存时补写 */ }
 		}
@@ -385,6 +414,10 @@ export default class ImageLMgrPlugin extends Plugin {
 	 */
 	private async syncToRemoteSilent() {
 		if (!this.settings.webdavEnable || !this.settings.webdavUrl) return;
+		if (!this.settings.webdavUrl.startsWith("https://")) {
+			console.warn("[ImageLMgr] WebDAV 仅支持 HTTPS，已跳过同步");
+			return;
+		}
 
 		try {
 			const url = `${this.settings.webdavUrl}${this.settings.webdavRemotePath.replace(/^\//, "")}`;
@@ -429,6 +462,9 @@ export default class ImageLMgrPlugin extends Plugin {
 		if (!this.settings.webdavEnable || !this.settings.webdavUrl) {
 			return { success: false, error: "请先启用 WebDAV 并填写服务器地址", conflict: false };
 		}
+		if (!this.settings.webdavUrl.startsWith("https://")) {
+			return { success: false, error: "WebDAV 仅支持 HTTPS 连接", conflict: false };
+		}
 
 		let localSyncedAt: string | undefined;
 		let remoteSyncedAt: string | undefined;
@@ -450,9 +486,8 @@ export default class ImageLMgrPlugin extends Plugin {
 
 			remoteSyncedAt = remoteData._syncedAt;
 
-			// 尝试获取本地上次同步时间（存储在插件数据中）
-			const localMeta = await this.loadData("_webdavmeta") as any;
-			if (localMeta) localSyncedAt = localMeta.lastSyncedAt;
+			// 尝试获取本地上次同步时间
+			if (this.webdavMeta) localSyncedAt = this.webdavMeta.lastSyncedAt;
 
 			// 冲突检测：两边都有更新
 			if (localSyncedAt && remoteSyncedAt) {
@@ -491,10 +526,10 @@ export default class ImageLMgrPlugin extends Plugin {
 			}
 
 			// 更新同步元数据
-			await this.saveData({
+			this.webdavMeta = {
 				lastSyncedAt: new Date().toISOString(),
 				lastSyncSource: "download",
-			}, "_webdavmeta");
+			};
 
 			await this.saveSettings();
 			return { success: true, conflict: false };
@@ -511,22 +546,14 @@ export default class ImageLMgrPlugin extends Plugin {
 		if (!activeFile || activeFile.extension !== "md") return {};
 
 		const content = await this.app.vault.read(activeFile);
-		const match = content.match(/^---\s*\n([\s\S]*?)\n---/);
-		if (!match || !match[1]) return {};
+		const config = parseFrontmatter(content);
+		if (!config) return {};
 
-		const yaml = match[1];
-		const config: Record<string, string | boolean | null> = {};
-
-		const bedMatch = yaml.match(/^(?:image[-_]?bed)\s*:\s*(.+)$/im);
-		if (bedMatch) config.imageBed = bedMatch[1].trim();
-
-		const autoMatch = yaml.match(/^(?:auto[-_]?upload)\s*:\s*(true|false)$/im);
-		if (autoMatch) config.autoUpload = autoMatch[1] === "true";
-
-		const pathMatch = yaml.match(/^(?:image[-_]?path)\s*:\s*(.+)$/im);
-		if (pathMatch) config.imagePath = pathMatch[1].trim().replace(/^["']|["']$/g, "");
-
-		return config;
+		const result: Record<string, string | boolean | null> = {};
+		if (config.imageBed !== undefined) result.imageBed = config.imageBed;
+		if (config.autoUpload !== undefined) result.autoUpload = config.autoUpload;
+		if (config.imagePath !== undefined) result.imagePath = config.imagePath;
+		return result;
 	}
 
 // ==================== 开发模式热加载 ====================

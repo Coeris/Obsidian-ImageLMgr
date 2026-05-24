@@ -113,7 +113,35 @@ npm run dev      # 开发模式（带 sourcemap）
 npm run build    # 生产构建
 ```
 
+## 项目结构
+
+```
+src/
+├── main.ts                 # 插件入口
+├── types.ts                # 类型定义
+├── icons.ts                # 图床图标 SVG
+├── comparator/             # 云端比对逻辑
+├── imagebed/               # 图床实现（GitHub/Aliyun/Tencent/SM.MS）
+├── parser/                 # 图片链接解析
+├── scanner/                # 库文件扫描
+├── settings/               # 设置面板
+├── utils/                  # 工具（哈希缓存/加密/Frontmatter 解析）
+└── view/                   # 主视图面板
+```
+
 ## 更新日志
+
+### v0.0.7
+- **修复阿里云/腾讯云 CORS 问题**：比对策略改为优先使用云端文件列表按文件名匹配，避免浏览器跨域 HEAD 请求被拦截
+- **阿里云 OSS V4 签名修复**：修复包含中文/空格文件名的签名错误（canonical URI 需 percent-encode）
+- **阿里云 OSS / 腾讯云 COS 目录树展示**：云端文件列表支持目录结构，可折叠/展开，显示每层文件数量
+- **云端未引用文件多选删除**：替换"一键清理"为多选模式，支持复选框勾选、全选、按文件夹全选
+- **嵌套文件夹树**：云端未引用文件按路径层级嵌套展示，支持折叠/展开，SVG 文件夹图标
+- **图床连接测试增强**：设置页每个图床卡片新增「测试连接」按钮，实时显示连接状态和创建目录能力
+- **Frontmatter 解析统一**：main.ts 的 getFileFrontmatter 委托给 FrontmatterParser 消除重复代码
+- **Bug 修复**：SM.MS testConnection 401 返回成功的问题
+- **SmMS → Other 重命名**：枚举值 `SmMS` 重命名为 `Other`（"其他图床"），SM.MS 服务本身保持不变
+- **代码与配置优化**：移除废弃代码和 13+ 未使用 CSS 类，tsconfig 对齐 ES2018，obsidian 依赖锁定 ^1.0.0
 
 ### v0.0.6
 - **新增图床筛选配置**：设置页支持自定义添加/编辑/删除图床筛选按钮，含域名、标签、图标、启用开关

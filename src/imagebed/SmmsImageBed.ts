@@ -1,5 +1,5 @@
 /**
- * SM.MS 图床实现
+ * 其他图床实现（含 SM.MS）
  */
 
 import { ImageBed, CloudFile, UploadResult, ImageLMgrSettings } from "../types";
@@ -31,13 +31,15 @@ export class SmmsImageBed implements ImageBed {
 			return data.data.map((item: any) => ({
 				name: item.filename || item.origin_name || "",
 				url: item.url || "",
+				isDirectory: false,
+				prefix: item.filename || item.origin_name || "",
 			}));
 		} catch {
 			return [];
 		}
 	}
 
-	async upload(file: File): Promise<UploadResult> {
+	async upload(file: File, _imagePath?: string): Promise<UploadResult> {
 		if (!this.token) {
 			return { success: false, error: "SM.MS Token 未配置" };
 		}
@@ -119,15 +121,17 @@ export class SmmsImageBed implements ImageBed {
 				headers: { Authorization: this.token },
 			});
 
-			if (response.ok || response.status === 401) {
-				// 401 也算网络通，只是 token 问题
+			if (response.status === 401) {
+				return { success: false, error: "Token 无效" };
+			}
+
+			if (response.ok) {
 				const data = await response.json();
 				if (data.success === false && data.message) {
 					return { success: false, error: data.message };
 				}
 				return { success: true };
 			}
-			if (response.status === 401) return { success: false, error: "Token 无效" };
 
 			return { success: false, error: `HTTP ${response.status}` };
 		} catch (e) {
@@ -137,5 +141,9 @@ export class SmmsImageBed implements ImageBed {
 
 	async createDirectory(_dirName: string): Promise<{ success: boolean; error?: string }> {
 		return { success: false, error: "SM.MS 不支持创建目录" };
+	}
+
+	testCreateDirectoryCapability(): Promise<{ supported: boolean; reason?: string }> {
+		return Promise.resolve({ supported: false, reason: "SM.MS 不支持创建目录" });
 	}
 }

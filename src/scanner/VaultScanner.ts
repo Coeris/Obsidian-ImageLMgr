@@ -64,24 +64,4 @@ export class VaultScanner {
 
 		return result;
 	}
-
-	/**
-	 * 扫描单个文件
-	 */
-	async scanFile(file: TFile): Promise<ImageLink[]> {
-		const content = await this.app.vault.read(file);
-		return this.parser.parse(content);
-	}
-
-	/**
-	 * 获取指定链接的全库使用信息
-	 */
-	async getLinkUsage(pure: string): Promise<{ count: number; files: string[] }> {
-		const allLinks = await this.scan();
-		const link = allLinks.get(pure);
-		if (link) {
-			return { count: link.count, files: link.files };
-		}
-		return { count: 0, files: [] };
-	}
 }

@@ -134,32 +134,4 @@ export class LinkParser {
 	private getLineNumber(content: string, offset: number): number {
 		return content.substring(0, offset).split("\n").length;
 	}
-
-	/**
-	 * 从文件内容中提取所有图片链接（用于替换操作）
-	 */
-	extractAllRawLinks(content: string): { raw: string; fullMatch: string }[] {
-		const results: { raw: string; fullMatch: string }[] = [];
-		let match: RegExpExecArray | null;
-
-		// Markdown 格式
-		MD_IMAGE_REGEX.lastIndex = 0;
-		while ((match = MD_IMAGE_REGEX.exec(content)) !== null) {
-			results.push({ raw: match[2], fullMatch: match[0] });
-		}
-
-		// Wiki 格式
-		WIKI_IMAGE_REGEX.lastIndex = 0;
-		while ((match = WIKI_IMAGE_REGEX.exec(content)) !== null) {
-			results.push({ raw: match[1].trim(), fullMatch: match[0] });
-		}
-
-		// HTML <img> 格式
-		HTML_IMG_REGEX.lastIndex = 0;
-		while ((match = HTML_IMG_REGEX.exec(content)) !== null) {
-			results.push({ raw: match[1].trim(), fullMatch: match[0] });
-		}
-
-		return results;
-	}
 }
